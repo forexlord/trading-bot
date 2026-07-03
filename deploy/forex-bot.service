@@ -21,7 +21,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/forex-bot/logs /opt/forex-bot/state /opt/forex-bot/forex_bot.db
+ReadWritePaths=/opt/forex-bot/logs /opt/forex-bot/state /opt/forex-bot/data
 
 [Install]
 WantedBy=multi-user.target

@@ -8,7 +8,8 @@ htmlcov/
 *.db
 *.sqlite
 *.sqlite3
-logs/*.jsonl
-state/*.json
+logs/
+state/
+data/
 .idea/
 .vscode/

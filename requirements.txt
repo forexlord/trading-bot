@@ -12,8 +12,6 @@ pytest-cov==6.0.0
 # mt5linux's published metadata pins an unrelated, ancient dev-environment
 # freeze (ancient cffi/cryptography/twine/keyring/SecretStorage) that it does
 # not actually need at runtime -- the client class only imports rpyc + numpy.
-# Install these two with --no-deps to avoid pulling that in and requiring a
-# C compiler:
-#   pip install --no-deps mt5linux==0.1.9 rpyc==6.0.1
-mt5linux==0.1.9
-rpyc==6.0.1
+# Install separately with --no-deps (after pip install -r requirements.txt):
+#   pip install --no-deps mt5linux==0.1.9 rpyc==5.0.1
+# Use rpyc 5.0.1 — must match the Wine-side RPyC server (5.x wire protocol).
