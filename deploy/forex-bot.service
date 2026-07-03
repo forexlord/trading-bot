@@ -1,0 +1,27 @@
+[Unit]
+Description=Forex trend-pullback bot (EURUSD/GBPUSD, Exness demo)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=forexbot
+Group=forexbot
+WorkingDirectory=/opt/forex-bot
+EnvironmentFile=/opt/forex-bot/.env
+# Drop --paper once you've validated behavior in paper mode.
+ExecStart=/opt/forex-bot/.venv/bin/python /opt/forex-bot/run_live.py --paper
+Restart=on-failure
+RestartSec=10
+
+# This process never listens on a socket -- it only makes outbound
+# connections to the local RPyC bridge (127.0.0.1:8001) and to
+# api.telegram.org for alerts. No inbound exposure is needed or granted.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/forex-bot/logs /opt/forex-bot/state /opt/forex-bot/forex_bot.db
+
+[Install]
+WantedBy=multi-user.target

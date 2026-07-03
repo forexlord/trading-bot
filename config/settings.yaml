@@ -1,0 +1,35 @@
+# Forex bot v1 configuration.
+# NOTE: there is intentionally no runtime switch to disable the kill switch here.
+# Re-enabling trading after a kill-switch trip requires a manual edit + restart.
+
+pairs: [EURUSD, GBPUSD]
+
+risk_per_trade: 0.01 # fraction of balance risked per trade
+max_open_trades: 2 # total concurrent open trades across all pairs
+max_per_symbol: 1 # max concurrent open trades per symbol
+daily_loss_limit: 0.04 # fraction of day-start equity; breach halts new entries until next broker day
+max_drawdown_kill: 0.12 # fraction below high-water-mark equity; breach trips the kill switch
+cooldown_after_loss_min: 15 # minutes after a losing trade before a new entry on that symbol is allowed
+
+session_utc: ["07:00", "16:00"]
+
+max_spread_pips:
+  EURUSD: 1.5
+  GBPUSD: 2.0
+
+trend_ema: 50
+pullback_ema: 20
+rsi_period: 14
+atr_period: 14
+atr_sl_mult: 1.5
+tp_r_multiple: 2.0
+spread_buffer_pips: 1.0
+
+pullback_lookback: 20 # M15 candles to look back for a pullback trigger
+pullback_expiry: 6 # M15 candles after which an active pullback state expires
+swing_lookback: 10 # M15 candles used for swing high/low SL calc
+h1_slope_lookback: 5 # H1 bars back used to confirm EMA50 slope direction
+
+backtest_start_equity: 4000 # cents ($40 at 1 cent = 1 unit)
+
+kill_switch_enabled: true # DO NOT expose this as a live-editable/runtime option
