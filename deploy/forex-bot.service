@@ -1,7 +1,9 @@
 [Unit]
-Description=Forex trend-pullback bot (EURUSD/GBPUSD, Exness demo)
-After=network-online.target docker.service
-Wants=network-online.target
+Description=Forex trend-pullback bot (EURUSD/GBPUSD)
+Documentation=file:///opt/forex-bot/README.md
+After=network-online.target mt5-bridge.service
+Wants=network-online.target mt5-bridge.service
+# Soft dependency: bot retries MT5 on its own; do not fail boot if bridge is still waiting on IPC.
 
 [Service]
 Type=simple
@@ -9,14 +11,14 @@ User=forexbot
 Group=forexbot
 WorkingDirectory=/opt/forex-bot
 EnvironmentFile=/opt/forex-bot/.env
-# Drop --paper once you've validated behavior in paper mode.
-ExecStart=/opt/forex-bot/.venv/bin/python /opt/forex-bot/run_live.py --paper
+# Drop --paper once paper mode is validated.
+# --db must point inside a ReadWritePaths dir: ProtectSystem=strict makes the
+# rest of /opt/forex-bot read-only, so the default ./forex_bot.db would fail.
+ExecStart=/opt/forex-bot/.venv/bin/python /opt/forex-bot/run_live.py --paper --db data/forex_bot.db
 Restart=on-failure
-RestartSec=10
+RestartSec=15
 
-# This process never listens on a socket -- it only makes outbound
-# connections to the local RPyC bridge (127.0.0.1:8001) and to
-# api.telegram.org for alerts. No inbound exposure is needed or granted.
+# Outbound only: 127.0.0.1:8001 (RPyC) and api.telegram.org.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

@@ -30,6 +30,6 @@ pullback_expiry: 6 # M15 candles after which an active pullback state expires
 swing_lookback: 10 # M15 candles used for swing high/low SL calc
 h1_slope_lookback: 5 # H1 bars back used to confirm EMA50 slope direction
 
-backtest_start_equity: 4000 # cents ($40 at 1 cent = 1 unit)
+backtest_start_equity: 400000 # account units ($4000 on Exness Standard Cent: 1 unit = $0.01)
 
 kill_switch_enabled: true # DO NOT expose this as a live-editable/runtime option

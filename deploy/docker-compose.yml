@@ -1,0 +1,42 @@
+# MetaTrader 5 (Wine) + VNC desktop for the forex-bot RPyC bridge.
+#
+# Images: exactly ONE — gmag11/metatrader5_vnc (the bot runs on the host venv).
+# Containers: exactly ONE — mt5.
+#
+# Bind only to loopback. Access VNC via SSH tunnel:
+#   ssh -L 3300:127.0.0.1:3300 user@vps
+#   open http://localhost:3300
+#
+# Usage (from repo root):
+#   cp deploy/mt5.env.example deploy/mt5.env   # edit VNC password
+#   ./deploy/up.sh
+#   # or: systemctl enable --now mt5-bridge
+
+services:
+  mt5:
+    # Pin digest in production when you have a known-good pull:
+    #   docker images --digests gmag11/metatrader5_vnc
+    #   image: gmag11/metatrader5_vnc@sha256:...
+    image: gmag11/metatrader5_vnc:latest
+    container_name: mt5
+    restart: unless-stopped
+    mem_limit: 1500m
+    volumes:
+      - mt5_config:/config
+    ports:
+      - "127.0.0.1:3300:3000" # VNC/web desktop
+      - "127.0.0.1:8001:8001" # mt5linux RPyC (started by supervise/setup scripts, not the image)
+    environment:
+      CUSTOM_USER: ${MT5_VNC_USER:-recovery}
+      PASSWORD: ${MT5_VNC_PASSWORD:?Set MT5_VNC_PASSWORD in deploy/mt5.env}
+    # Image entrypoint installs Wine/MT5; its built-in mt5linux start is broken
+    # (Unknown switch -w). We ignore that and run deploy/supervise-mt5.sh instead.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  mt5_config:
+    name: forex-bot-mt5-config

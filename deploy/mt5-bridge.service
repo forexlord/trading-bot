@@ -1,0 +1,22 @@
+[Unit]
+Description=MT5 stack supervisor (container + terminal64 + RPyC :8001)
+Documentation=file:///opt/forex-bot/README.md
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/forex-bot
+# Long-running loop: restarts terminal/bridge if they die or the container restarts.
+ExecStart=/opt/forex-bot/deploy/supervise-mt5.sh
+Restart=always
+RestartSec=10
+# First Wine/MT5 install can take several minutes.
+TimeoutStartSec=0
+
+# Needs docker CLI + compose (root or docker group).
+User=root
+
+[Install]
+WantedBy=multi-user.target

@@ -13,44 +13,88 @@ run the *exact same code* — they only differ in data source and executor.
 
 ## Prerequisites
 
-- An MT5 terminal running in a Docker container on your Linux VPS, with the
-  `mt5linux` RPyC server exposed on `localhost:8001`.
+- Linux VPS with Docker (compose v2).
 - An Exness Standard Cent demo (or live) account. Account currency is
-  cents — e.g. a $40 account reports `balance=4000`. The code always reads
-  `account_info()`; nothing is hardcoded in dollars.
+  cents — e.g. a $4000 account reports `balance=400000`. The code always
+  reads `account_info()`; nothing is hardcoded in dollars.
 - Python 3.11+ (developed against 3.12).
 
-## Setup
+## VPS deploy (reproducible)
+
+Everything for MT5 lives under [`deploy/`](deploy/): compose file, scripts,
+and systemd units. Do **not** hand-edit a separate `/opt/mt5` tree.
+
+**Docker footprint:** exactly **one image** (`gmag11/metatrader5_vnc:latest`)
+and **one container** (`mt5`). The trading bot is **not** containerized — it
+runs in a host venv and connects to `127.0.0.1:8001`.
 
 ```bash
-git clone <this repo> forex-bot
-cd forex-bot
-python3.12 -m venv .venv
-source .venv/bin/activate        # .venv\Scripts\activate on Windows
+git clone <this repo> /opt/forex-bot
+cd /opt/forex-bot
 
-pip install -r requirements.txt
-```
-
-`mt5linux`'s published PyPI metadata pins an unrelated, ancient
-dev-environment freeze (`cffi==1.15.0`, `cryptography`, `twine`, `keyring`,
-`SecretStorage`, ...) that has nothing to do with its runtime behavior — the
-client class only actually imports `rpyc` and `numpy`. Installing it
-normally on a modern Python requires a C compiler for that old `cffi`.
-`requirements.txt` documents this; if `pip install -r requirements.txt`
-tries to build `cffi` from source, install `mt5linux`/`rpyc` separately with
-`--no-deps`:
-
-```bash
-pip install --no-deps mt5linux==0.1.9 rpyc==6.0.1
-```
-
-Then configure secrets:
-
-```bash
+# Bot secrets
 cp .env.example .env
-# edit .env: MT5_HOST, MT5_PORT, MT5_LOGIN, MT5_PASSWORD, MT5_SERVER,
-# TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+# edit .env: MT5_HOST=127.0.0.1, MT5_PORT=8001, MT5_LOGIN, MT5_PASSWORD,
+# MT5_SERVER, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+
+# VNC password for the MT5 desktop (never commit)
+cp deploy/mt5.env.example deploy/mt5.env
+# edit deploy/mt5.env: MT5_VNC_PASSWORD=...
+
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+# mt5linux pins broken ancient deps — install client-side only with --no-deps.
+# Use rpyc 5.0.1 to match the Wine-side RPyC server (5.x wire protocol).
+.venv/bin/pip install --no-deps mt5linux==0.1.9 rpyc==5.0.1
+mkdir -p data logs state
+chmod +x deploy/*.sh
+
+# Interactive bring-up (retries IPC for a few minutes)
+./deploy/up.sh
 ```
+
+**One-time GUI steps** (cannot be fully automated — Exness login + Python IPC
+flag). From your PC:
+
+```bash
+ssh -L 3300:127.0.0.1:3300 user@your-vps
+# open http://localhost:3300  (VNC user/password from deploy/mt5.env)
+```
+
+In MT5:
+
+1. File → Login to Trade Account (same credentials as `.env`)
+2. Tools → Options → Community → enable **Python integration**
+3. Tools → Options → Expert Advisors → enable **Allow algorithmic trading**
+4. File → Exit, then on the VPS: `./deploy/start-mt5-terminal.sh`
+5. Log in again, wait for green connection bars
+6. Re-run: `./deploy/setup-mt5-bridge.sh` (or `./deploy/up.sh`)
+
+After that, login is stored in the Docker volume `forex-bot-mt5-config`.
+Production path (supervisor keeps terminal + bridge alive across reboots):
+
+```bash
+sudo ./deploy/install-systemd.sh
+./deploy/status.sh
+# when Bot → MT5 is OK:
+sudo systemctl enable --now forex-bot
+```
+
+| Script | Purpose |
+|--------|---------|
+| [`deploy/up.sh`](deploy/up.sh) | one-shot compose + terminal + bridge |
+| [`deploy/supervise-mt5.sh`](deploy/supervise-mt5.sh) | long-running keep-alive (systemd) |
+| [`deploy/down.sh`](deploy/down.sh) | stop supervisor + container (keep volume) |
+| [`deploy/start-mt5-terminal.sh`](deploy/start-mt5-terminal.sh) | start `terminal64.exe` via `wine64` |
+| [`deploy/setup-mt5-bridge.sh`](deploy/setup-mt5-bridge.sh) | 64-bit Python + RPyC on `:8001` |
+| [`deploy/status.sh`](deploy/status.sh) | health check |
+| [`deploy/install-systemd.sh`](deploy/install-systemd.sh) | install units + permissions |
+| [`deploy/vps-teardown.sh`](deploy/vps-teardown.sh) | remove stack (`WIPE_MT5_VOLUME=1` / `WIPE_BOT=1`) |
+
+The stock `gmag11/metatrader5_vnc` image auto-starts a **broken** mt5linux
+(`Unknown switch -w`) and ships **32-bit** Python. Always use
+`deploy/setup-mt5-bridge.sh` / `supervise-mt5.sh` — never rely on the image's
+step `[7/7]`.
 
 Strategy/risk parameters live in [config/settings.yaml](config/settings.yaml)
 (not `.env`) — loaded via pydantic-settings. There is intentionally no
@@ -68,7 +112,7 @@ priority — they should pass before anything touches the execution layer.
 ## Pull historical data
 
 ```bash
-python pull_data.py --days 730 --db forex_bot.db
+python pull_data.py --days 730 --db data/forex_bot.db
 ```
 
 Fetches 2 years of M15+H1 candles for the configured pairs into SQLite and
@@ -78,10 +122,10 @@ are not flagged).
 ## Backtest
 
 ```bash
-python run_backtest.py --db forex_bot.db
+python run_backtest.py --db data/forex_bot.db
 # or restrict to a date range, e.g. to check two halves of history separately:
-python run_backtest.py --db forex_bot.db --start 2023-01-01 --end 2023-12-31
-python run_backtest.py --db forex_bot.db --start 2024-01-01 --end 2024-12-31
+python run_backtest.py --db data/forex_bot.db --start 2023-01-01 --end 2023-12-31
+python run_backtest.py --db data/forex_bot.db --start 2024-01-01 --end 2024-12-31
 ```
 
 Prints trade count, win rate, avg win/loss, profit factor, max drawdown,
@@ -145,21 +189,27 @@ manually inspect what happened and edit `kill_switch_triggered` back to
 
 ## systemd deployment
 
-See [deploy/forex-bot.service](deploy/forex-bot.service). It runs the bot
-as an unprivileged user, restarts on failure, and never opens an inbound
-port — it only makes outbound connections to the local RPyC bridge
-(`127.0.0.1:8001`) and to `api.telegram.org` for alerts.
+Two units:
+
+- [`deploy/mt5-bridge.service`](deploy/mt5-bridge.service) — `Type=simple`,
+  runs [`deploy/supervise-mt5.sh`](deploy/supervise-mt5.sh) forever: brings
+  the container up, starts `terminal64` / RPyC if they die, retries IPC until
+  login works
+- [`deploy/forex-bot.service`](deploy/forex-bot.service) — paper/live bot
+  (`Wants=mt5-bridge`, does not hard-fail boot if IPC is still warming up)
+
+The bot never opens an inbound port — only outbound to `127.0.0.1:8001` and
+`api.telegram.org`.
 
 ```bash
-sudo useradd -r -s /usr/sbin/nologin forexbot
-sudo mkdir -p /opt/forex-bot
-sudo cp -r . /opt/forex-bot
-sudo chown -R forexbot:forexbot /opt/forex-bot
-sudo cp deploy/forex-bot.service /etc/systemd/system/
-sudo systemctl daemon-reload
+sudo ./deploy/install-systemd.sh
+sudo journalctl -u mt5-bridge -f
+# Drop --paper in forex-bot.service once paper mode is validated.
 sudo systemctl enable --now forex-bot
-sudo journalctl -u forex-bot -f
 ```
+
+If IPC is not ready yet, `mt5-bridge` keeps retrying (see journal). Fix via
+VNC once; after credentials are saved in the volume, reboots recover alone.
 
 ## What this bot deliberately does not do
 

@@ -1,22 +1,30 @@
 #!/usr/bin/env bash
-# Start the mt5linux RPyC bridge inside the gmag11/metatrader5_vnc container.
-# Prerequisites:
-#   - MT5 terminal logged in via VNC (http://localhost:3300)
-#   - Tools → Options → Community → "Python integration" enabled
-#   - 64-bit Windows Python installed in Wine (this script installs it if missing)
+# Install 64-bit Wine Python (once) and start the mt5linux RPyC bridge on :8001.
+#
+# The stock gmag11 image auto-starts a broken mt5linux (Unknown switch -w) and
+# ships 32-bit Python, which cannot IPC to terminal64.exe. This script is the
+# supported path.
+#
+# Prerequisites (one-time, via VNC http://localhost:3300):
+#   - File → Login to Trade Account (Exness)
+#   - Tools → Options → Community → Python integration ON
+#   - Tools → Options → Expert Advisors → Allow algorithmic trading ON
+#   - Restart MT5 once after enabling Python integration
 set -euo pipefail
+# shellcheck source=lib.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
-CONTAINER="${MT5_CONTAINER:-mt5}"
-PY64_WIN='C:\users\abc\AppData\Local\Programs\Python\Python39\python.exe'
-PY64="/config/.wine/drive_c/users/abc/AppData/Local/Programs/Python/Python39/python.exe"
-PY64_URL='https://www.python.org/ftp/python/3.9.13/python-3.9.13-amd64.exe'
-LINUX_VENV='/config/mt5venv'
+SKIP_IPC_TEST="${SKIP_IPC_TEST:-0}"
+QUIET="${QUIET:-0}"
+
+wait_for_container 30
+docker exec "$CONTAINER" chown -R abc:abc /config 2>/dev/null || true
 
 echo "==> Stopping any existing bridge..."
-docker exec "$CONTAINER" sh -c 'pkill -f server.py 2>/dev/null; pkill -f mt5linux 2>/dev/null; sleep 2' || true
+docker exec "$CONTAINER" sh -c 'pkill -f "[s]erver.py" 2>/dev/null; pkill -f "[m]t5linux" 2>/dev/null; sleep 2' || true
 
 echo "==> Ensuring Linux-side launcher venv..."
-docker exec -u abc "$CONTAINER" bash -lc "
+exec_abc "
   if [ ! -x $LINUX_VENV/bin/python ]; then
     python3 -m venv $LINUX_VENV
     $LINUX_VENV/bin/pip install --no-deps mt5linux==0.1.9 rpyc==5.0.1 plumbum numpy
@@ -24,33 +32,60 @@ docker exec -u abc "$CONTAINER" bash -lc "
 "
 
 if ! docker exec "$CONTAINER" test -f "$PY64"; then
-  echo "==> Installing 64-bit Windows Python in Wine (required for terminal64.exe IPC)..."
-  docker exec -u abc -e HOME=/config -e WINEPREFIX=/config/.wine "$CONTAINER" bash -lc "
+  echo "==> Installing 64-bit Windows Python in Wine (one-time)..."
+  exec_abc "
     cd /tmp
-    curl -LO $PY64_URL
+    curl -fsSL -o python-3.9.13-amd64.exe $PY64_URL
     wine64 python-3.9.13-amd64.exe /quiet InstallAllUsers=0 PrependPath=1 Include_pip=1
   "
 fi
 
-echo "==> Installing MetaTrader5 + rpyc on 64-bit Wine Python..."
-docker exec -u abc -e HOME=/config -e WINEPREFIX=/config/.wine "$CONTAINER" bash -lc "
-  wine64 '$PY64' -m pip install -q MetaTrader5 rpyc==5.0.1 plumbum
-"
+echo "==> Installing MetaTrader5 + rpyc==5.0.1 on 64-bit Wine Python..."
+# numpy<2: the MetaTrader5 wheel is built against the numpy 1.x ABI; with
+# numpy 2.x "import MetaTrader5" fails with numpy.core.multiarray errors.
+exec_abc "wine64 '$PY64' -m pip install -q \"numpy<2\" MetaTrader5 rpyc==5.0.1 plumbum"
 
-echo "==> Quick IPC test (MT5 must be running and logged in)..."
-docker exec -u abc -e HOME=/config -e WINEPREFIX=/config/.wine -e DISPLAY=:1 "$CONTAINER" bash -lc "
-  wine64 '$PY64' -c \"
+if ! terminal_running; then
+  echo "==> Terminal not running — starting it..."
+  "$DEPLOY_DIR/start-mt5-terminal.sh"
+fi
+
+if [[ "$SKIP_IPC_TEST" != "1" ]]; then
+  echo "==> IPC test (terminal must be logged in + Python integration enabled)..."
+  if ! exec_abc "
+    wine64 '$PY64' -c \"
 import MetaTrader5 as mt5
-ok = mt5.initialize(path='C:/Program Files/MetaTrader 5/terminal64.exe', timeout=120000)
+import sys
+ok = mt5.initialize(path='$TERMINAL_WIN', timeout=120000)
 print('initialize:', ok, 'error:', mt5.last_error())
-import sys; sys.exit(0 if ok else 1)
+sys.exit(0 if ok else 1)
 \"
-"
+  "; then
+    if [[ "$QUIET" != "1" ]]; then
+      cat >&2 <<'EOF'
 
-docker exec "$CONTAINER" sh -c 'rm -rf /config/mt5linux; : > /config/mt5srv.log'
+IPC failed. One-time GUI steps (SSH tunnel → http://localhost:3300):
+  1. Open MT5, File → Login to Trade Account (same credentials as .env)
+  2. Tools → Options → Community → enable "Python integration"
+  3. Tools → Options → Expert Advisors → enable "Allow algorithmic trading"
+  4. File → Exit, then: ./deploy/start-mt5-terminal.sh
+  5. Log in again, wait for green connection bars
+  6. Re-run: ./deploy/setup-mt5-bridge.sh
 
-echo "==> Starting bridge on 0.0.0.0:8001..."
-docker exec -d -u abc -e HOME=/config -e WINEPREFIX=/config/.wine -e DISPLAY=:1 "$CONTAINER" bash -lc "
+To start the bridge without the IPC gate (not recommended):
+  SKIP_IPC_TEST=1 ./deploy/setup-mt5-bridge.sh
+EOF
+    fi
+    exit 1
+  fi
+fi
+
+# chown the log: this exec runs as root, but the bridge appends as abc — on a
+# fresh volume a root-owned log makes the detached bridge die on redirect.
+docker exec "$CONTAINER" sh -c 'rm -rf /config/mt5linux; : > /config/mt5srv.log; chown abc:abc /config/mt5srv.log'
+
+echo "==> Starting RPyC bridge on 0.0.0.0:8001..."
+exec_abc_d "
   $LINUX_VENV/bin/python -m mt5linux \
     '$PY64' \
     --host 0.0.0.0 -p 8001 -s /config/mt5linux -w wine64 \
@@ -58,5 +93,11 @@ docker exec -d -u abc -e HOME=/config -e WINEPREFIX=/config/.wine -e DISPLAY=:1 
 "
 
 sleep 5
-docker exec "$CONTAINER" tail -5 /config/mt5srv.log
-echo "==> Done. Test from host: cd /opt/forex-bot && .venv/bin/python -c \"from src.config import load_secrets; from src.data.mt5_client import MT5Client; s=load_secrets(); c=MT5Client(s.mt5_host,s.mt5_port,s.mt5_login,s.mt5_password,s.mt5_server); c.connect(); print(c.account_info()); c.shutdown()\""
+docker exec "$CONTAINER" tail -8 /config/mt5srv.log || true
+
+if bridge_listening; then
+  echo "==> Bridge listening on :8001"
+else
+  echo "==> Bridge may not be listening — check: docker exec $CONTAINER cat /config/mt5srv.log" >&2
+  exit 1
+fi
