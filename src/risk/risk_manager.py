@@ -113,9 +113,11 @@ def _floor_to_step(value: float, step: float) -> float:
 
 
 def evaluate(signal: Signal, account: AccountState, params: Any) -> Verdict:
-    kill_threshold = account.hwm * (1 - params.max_drawdown_kill)
-    if account.kill_switch_triggered or account.equity <= kill_threshold:
-        return Rejected("kill_switch")
+    if getattr(params, "kill_switch_enabled", True):
+        kill_threshold = account.hwm * (1 - params.max_drawdown_kill)
+        if account.kill_switch_triggered or account.equity <= kill_threshold:
+            return Rejected("kill_switch")
+
 
     daily_threshold = account.day_start_equity * (1 - params.daily_loss_limit)
     if account.equity <= daily_threshold:

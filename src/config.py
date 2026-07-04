@@ -1,17 +1,32 @@
 """Configuration loading: static strategy/risk params from config/settings.yaml,
 secrets (MT5 credentials, Telegram token) from environment / .env.
+
+Research flags (e.g. KILL_SWITCH_ENABLED) may be overridden from the environment
+so backtests can run without the drawdown latch. Default remains enabled.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import Field
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SETTINGS_YAML_PATH = REPO_ROOT / "config" / "settings.yaml"
+
+load_dotenv(REPO_ROOT / ".env")
+
+
+def _env_bool(name: str) -> bool | None:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return None
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 
 
 class Settings(BaseSettings):
@@ -52,8 +67,13 @@ class Settings(BaseSettings):
     @classmethod
     def load(cls, path: Path = SETTINGS_YAML_PATH) -> "Settings":
         with open(path, "r") as f:
-            raw: dict[str, Any] = yaml.safe_load(f)
+            raw: dict[str, Any] = yaml.safe_load(f) or {}
+        # .env / process env overrides yaml (research). Default remains enabled.
+        ks = _env_bool("KILL_SWITCH_ENABLED")
+        if ks is not None:
+            raw["kill_switch_enabled"] = ks
         return cls(**raw)
+
 
 
 class Secrets(BaseSettings):

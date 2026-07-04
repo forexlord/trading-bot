@@ -288,9 +288,12 @@ class BacktestEngine:
         return self.params.max_spread_pips.get(symbol, 0.0)
 
     def _account_state(self, symbol: str, ts: pd.Timestamp) -> rm.AccountState:
-        kill_threshold = self.hwm * (1 - self.params.max_drawdown_kill)
-        if not self.kill_switch_triggered and self.equity <= kill_threshold:
-            self.kill_switch_triggered = True
+        if getattr(self.params, "kill_switch_enabled", True):
+            kill_threshold = self.hwm * (1 - self.params.max_drawdown_kill)
+            if not self.kill_switch_triggered and self.equity <= kill_threshold:
+                self.kill_switch_triggered = True
+        else:
+            self.kill_switch_triggered = False
 
         pip_value = assumed_pip_value_per_lot(symbol)
         symbol_info = rm.SymbolInfo(pip_value_per_lot=pip_value, volume_step=0.01, volume_min=0.01)
@@ -301,6 +304,7 @@ class BacktestEngine:
             day_start_equity=self.day_start_equity,
             hwm=self.hwm,
             kill_switch_triggered=self.kill_switch_triggered,
+
             now_utc=ts.to_pydatetime(),
             spread_pips=self._assumed_spread_pips(symbol),
             symbol_info=symbol_info,

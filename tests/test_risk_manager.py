@@ -24,6 +24,7 @@ PARAMS = SimpleNamespace(
     cooldown_after_loss_min=15,
     session_utc=["07:00", "16:00"],
     max_spread_pips={"EURUSD": 1.5, "GBPUSD": 2.0},
+    kill_switch_enabled=True,
 )
 
 NOW = datetime(2024, 1, 2, 10, 0, tzinfo=timezone.utc)  # Tuesday, well inside session
@@ -73,6 +74,14 @@ def test_kill_switch_latch_rejects_even_if_equity_recovered():
     verdict = evaluate(make_signal(), account, PARAMS)
     assert isinstance(verdict, Rejected)
     assert verdict.reason == "kill_switch"
+
+
+def test_kill_switch_disabled_allows_trade_through_drawdown():
+    params = deepcopy(PARAMS)
+    params.kill_switch_enabled = False
+    account = make_account(hwm=5000.0, equity=5000.0 * (1 - 0.12), kill_switch_triggered=True)
+    verdict = evaluate(make_signal(), account, params)
+    assert isinstance(verdict, Approved)
 
 
 def test_daily_cap_breach_rejects():

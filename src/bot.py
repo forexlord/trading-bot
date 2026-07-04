@@ -139,10 +139,15 @@ class Bot:
             self._daily_cap_alerted_day = None
         self.state.update_hwm(equity)
 
-        was_tripped = self.state.kill_switch_triggered
-        now_tripped = self.state.maybe_trip_kill_switch(equity, self.settings.max_drawdown_kill)
-        if now_tripped and not was_tripped:
-            self.telegram.kill_switch_triggered(equity, self.state.hwm)
+        if self.settings.kill_switch_enabled:
+            was_tripped = self.state.kill_switch_triggered
+            now_tripped = self.state.maybe_trip_kill_switch(equity, self.settings.max_drawdown_kill)
+            if now_tripped and not was_tripped:
+                self.telegram.kill_switch_triggered(equity, self.state.hwm)
+        else:
+            # Research mode: do not latch or alert; risk_manager also skips the check.
+            self.state.kill_switch_triggered = False
+
 
         daily_threshold = self.state.day_start_equity * (1 - self.settings.daily_loss_limit)
         if equity <= daily_threshold and self._daily_cap_alerted_day != self.state.current_day:
