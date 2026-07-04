@@ -6,6 +6,7 @@ history independently.
 from __future__ import annotations
 
 import argparse
+import logging
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -14,6 +15,8 @@ from src.backtest.engine import BacktestEngine, _SymbolData
 from src.backtest.report import print_report_from_frames
 from src.config import load_settings
 from src.data.store import Store
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 
 def parse_date(value: str) -> datetime:

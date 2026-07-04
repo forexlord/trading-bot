@@ -18,6 +18,7 @@ class JsonlLogger:
         self._dir = Path(log_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
         self._prefix = prefix
+        self._handles: dict[Path, Any] = {}
         self._purge_old()
 
     def _path_for(self, ts: datetime) -> Path:
@@ -25,8 +26,27 @@ class JsonlLogger:
 
     def write(self, record: dict[str, Any], ts: datetime | None = None) -> None:
         ts = ts or datetime.now(timezone.utc)
-        with open(self._path_for(ts), "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, default=str) + "\n")
+        path = self._path_for(ts)
+        fh = self._handles.get(path)
+        if fh is None:
+            fh = open(path, "a", encoding="utf-8")
+            self._handles[path] = fh
+        fh.write(json.dumps(record, default=str) + "\n")
+        # Flush so readers/tests see lines without waiting for close(); still
+        # far cheaper than open/close per record.
+        fh.flush()
+
+    def close(self) -> None:
+        for fh in self._handles.values():
+            fh.close()
+        self._handles.clear()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+
 
     def _purge_old(self) -> None:
         cutoff = datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS)

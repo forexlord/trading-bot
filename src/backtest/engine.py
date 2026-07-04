@@ -9,16 +9,18 @@ been hit first (pessimistic).
 """
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+import logging
+from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from src.logger import DecisionLogger, EquityLogger, TradeLogger
 from src.risk import risk_manager as rm
 from src.strategy import trend_pullback as strat
+
+logger = logging.getLogger(__name__)
 
 SLIPPAGE_PIPS = 0.5
 CONTRACT_SIZE = 100_000
@@ -101,30 +103,48 @@ class BacktestEngine:
         self.equity_log = EquityLogger(log_dir)
         self._last_equity_log_hour: Any = None
 
+        # Pre-index bars so the main loop is O(1) per symbol per timestamp
+        # instead of scanning full DataFrames every bar.
+        self._m15_by_time: dict[str, dict[Any, int]] = {}
+        self._h1_times: dict[str, np.ndarray] = {}
+        for symbol, sd in self.data.items():
+            self._m15_by_time[symbol] = {t: i for i, t in enumerate(sd.m15["time"].to_numpy())}
+            self._h1_times[symbol] = sd.h1["time"].to_numpy()
+
     # -- main loop ---------------------------------------------------------
 
     def run(self) -> None:
         timeline = self._build_timeline()
-        for ts in timeline:
-            self._roll_day_if_needed(ts)
-            for symbol, idx in self._symbols_at(ts).items():
-                self._process_exits(symbol, idx, ts)
-                self._process_eval(symbol, idx, ts)
-            self._maybe_log_equity(ts)
-        self._finalize_open_positions_marker()
+        n = len(timeline)
+        logger.info("Backtest timeline: %d M15 timestamps across %d symbols", n, len(self.data))
+        try:
+            for i, ts in enumerate(timeline):
+                self._roll_day_if_needed(ts)
+                for symbol, idx in self._symbols_at(ts).items():
+                    self._process_exits(symbol, idx, ts)
+                    self._process_eval(symbol, idx, ts)
+                self._maybe_log_equity(ts)
+                if i > 0 and i % 5000 == 0:
+                    logger.info("Backtest progress: %d / %d (%.0f%%)", i, n, 100.0 * i / n)
+            self._finalize_open_positions_marker()
+            logger.info("Backtest complete: %d closed trades", len(self.closed_trades))
+        finally:
+            self.decision_log.close()
+            self.trade_log.close()
+            self.equity_log.close()
 
     def _build_timeline(self) -> list[pd.Timestamp]:
-        all_times: set[pd.Timestamp] = set()
-        for sd in self.data.values():
-            all_times.update(sd.m15["time"].tolist())
+        all_times: set[Any] = set()
+        for by_time in self._m15_by_time.values():
+            all_times.update(by_time)
         return sorted(all_times)
 
     def _symbols_at(self, ts: pd.Timestamp) -> dict[str, int]:
         result = {}
-        for symbol, sd in self.data.items():
-            matches = sd.m15.index[sd.m15["time"] == ts]
-            if len(matches) > 0:
-                result[symbol] = int(matches[0])
+        for symbol, by_time in self._m15_by_time.items():
+            idx = by_time.get(ts)
+            if idx is not None:
+                result[symbol] = idx
         return result
 
     def _roll_day_if_needed(self, ts: pd.Timestamp) -> None:
@@ -208,7 +228,11 @@ class BacktestEngine:
 
     def _process_eval(self, symbol: str, idx: int, ts: pd.Timestamp) -> None:
         sd = self.data[symbol]
-        h1_slice = sd.h1[sd.h1["time"] <= ts].tail(WARMUP_H1_BARS)
+        # Binary search for last H1 bar at-or-before ts (was a full boolean scan).
+        h1_times = self._h1_times[symbol]
+        h1_end = int(np.searchsorted(h1_times, ts, side="right"))
+        h1_start = max(0, h1_end - WARMUP_H1_BARS)
+        h1_slice = sd.h1.iloc[h1_start:h1_end]
         m15_slice = sd.m15.iloc[max(0, idx - WARMUP_M15_BARS + 1) : idx + 1]
 
         if h1_slice.empty or len(m15_slice) < 2:

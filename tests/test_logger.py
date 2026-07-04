@@ -8,6 +8,7 @@ def test_write_creates_dated_file_and_appends_jsonl(tmp_path):
     ts = datetime(2024, 3, 1, 12, 0, tzinfo=timezone.utc)
     logger.write({"a": 1}, ts=ts)
     logger.write({"a": 2}, ts=ts)
+    logger.close()
 
     path = tmp_path / "decisions-2024-03-01.jsonl"
     lines = path.read_text().strip().splitlines()
