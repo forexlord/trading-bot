@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 import pandas as pd
+import rpyc.utils.classic
 from mt5linux import MetaTrader5
 
 logger = logging.getLogger(__name__)
@@ -100,8 +101,24 @@ class MT5Client:
         return _rates_to_df(rates)
 
     def copy_rates_range(self, symbol: str, timeframe: str, date_from: datetime, date_to: datetime) -> pd.DataFrame:
+        """Fetch bars in [date_from, date_to].
+
+        mt5linux 0.1.9 builds invalid remote ``eval()`` source for tz-aware
+        datetimes (the second arg becomes a bare ``2026-07-04 10:26:...``
+        literal and raises SyntaxError). Call the remote MT5 API with unix
+        timestamps instead.
+        """
         tf = _resolve_timeframe(self.raw, timeframe)
-        rates = self.raw.copy_rates_range(symbol, tf, date_from, date_to)
+        from_ts = int(date_from.timestamp())
+        to_ts = int(date_to.timestamp())
+        conn = getattr(self.raw, "_MetaTrader5__conn")
+        code = (
+            "import datetime as _dt; "
+            f"mt5.copy_rates_range({symbol!r}, {int(tf)}, "
+            f"_dt.datetime.fromtimestamp({from_ts}, _dt.timezone.utc), "
+            f"_dt.datetime.fromtimestamp({to_ts}, _dt.timezone.utc))"
+        )
+        rates = rpyc.utils.classic.obtain(conn.eval(code))
         return _rates_to_df(rates)
 
     def open_positions(self) -> list[dict]:
