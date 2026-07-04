@@ -19,9 +19,26 @@ def make_engine(tmp_path, data=None):
     return BacktestEngine(data=data or {}, params=RISK_PARAMS, log_dir=str(tmp_path), start_equity=4000.0)
 
 
+def test_pip_value_usd_quote_pairs():
+    # 1 pip * 100k contract, in cents: 0.0001 * 100000 * 100 = 1000
+    assert assumed_pip_value_per_lot("EURUSD", 1.10) == pytest.approx(1000.0)
+    assert assumed_pip_value_per_lot("GBPUSDm", 1.30) == pytest.approx(1000.0)  # cent suffix
+
+
+def test_pip_value_usd_base_pairs_divide_by_price():
+    # USDJPY: pip 0.01, value = 0.01 * 100000 / 150 = 6.67 USD -> 666.7 cents
+    assert assumed_pip_value_per_lot("USDJPY", 150.0) == pytest.approx(0.01 * 100000 / 150.0 * 100)
+    assert assumed_pip_value_per_lot("USDCADm", 1.36) == pytest.approx(0.0001 * 100000 / 1.36 * 100)
+
+
+def test_pip_value_rejects_crosses():
+    with pytest.raises(ValueError):
+        assumed_pip_value_per_lot("EURJPY", 160.0)
+
+
 def test_both_touched_in_one_candle_resolves_to_sl(tmp_path):
     engine = make_engine(tmp_path)
-    pip_value = assumed_pip_value_per_lot("EURUSD")
+    pip_value = assumed_pip_value_per_lot("EURUSD", 1.1050)
     position = OpenPosition(
         trade_id="t1",
         symbol="EURUSD",
@@ -63,7 +80,7 @@ def test_both_touched_in_one_candle_resolves_to_sl(tmp_path):
 
 def test_tp_only_touch_closes_as_tp_with_profit(tmp_path):
     engine = make_engine(tmp_path)
-    pip_value = assumed_pip_value_per_lot("EURUSD")
+    pip_value = assumed_pip_value_per_lot("EURUSD", 1.1050)
     position = OpenPosition(
         trade_id="t2",
         symbol="EURUSD",

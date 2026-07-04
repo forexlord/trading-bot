@@ -101,6 +101,37 @@ def test_long_breakout_fires_only_on_h4_boundary_m15_close():
     assert off_boundary is None
 
 
+def test_slope_filter_blocks_weak_trend():
+    h4 = _trending_h4()
+    h4_close_time = h4["time"].iloc[-1] + pd.Timedelta(hours=4)
+    final_close = float(h4["close"].iloc[-1]) + 0.0030
+    params = SimpleNamespace(**vars(PARAMS), h4_min_slope_atr_frac=999.0, h4_min_atr_percentile=0.0)
+    m15 = _m15_ending_at(h4_close_time, 8, final_close)
+    assert evaluate("EURUSD", h4, m15, PARAMS) is not None
+    assert evaluate("EURUSD", h4, m15, params) is None
+
+
+def test_atr_percentile_filter_blocks_low_vol():
+    # Flat range -> low ATR percentile vs history with a volatility spike earlier.
+    flat = [1.1000] * 30
+    spike = [1.1000 + (0.05 if i % 2 == 0 else -0.05) for i in range(30)]
+    closes = spike + flat
+    h4 = _h4_bars("2024-01-01 00:00", closes, spread_range=0.0002)
+    h4_close_time = h4["time"].iloc[-1] + pd.Timedelta(hours=4)
+    # Force a marginal breakout on the last bar
+    last_close = float(h4["close"].iloc[-1]) + 0.0010
+    params = SimpleNamespace(
+        **vars(PARAMS),
+        h4_min_slope_atr_frac=0.0,
+        h4_min_atr_percentile=50.0,
+        h4_atr_percentile_lookback=60,
+    )
+    m15 = _m15_ending_at(h4_close_time, 8, last_close)
+    # With high percentile threshold, flat-tail ATR should be rejected even if regime fires.
+    sig = evaluate("EURUSD", h4, m15, params)
+    assert sig is None
+
+
 def test_no_signal_without_regime():
     closes = [1.1000 + 0.0003 * ((i % 8) - 4) for i in range(40)]  # oscillating, flat
     h4 = _h4_bars("2024-01-01 00:00", closes)
@@ -122,6 +153,38 @@ def test_update_stop_proposes_tighter_only():
     # If current SL is already above the chandelier level, no proposal.
     tight_sl = float(h4["close"].iloc[-1])  # unrealistically tight
     assert update_stop("EURUSD", "LONG", entry, entry_time, tight_sl, h4, m15, PARAMS) is None
+
+
+def test_update_stop_breakeven_locks_after_move():
+    # Flat market, then ONE spike bar >= 2 ATR in favor: the chandelier is
+    # still below entry, so the breakeven rule must win and propose
+    # entry + spread buffer.
+    params = SimpleNamespace(**vars(PARAMS), h4_breakeven_after_atr=2.0, spread_buffer_pips=1.0)
+
+    flat = [1.1000] * 20
+    times = pd.date_range("2024-01-01 00:00", periods=21, freq="4h", tz="UTC")
+    rows = [
+        {"time": times[i], "open": 1.1000, "high": 1.1010, "low": 1.0990, "close": flat[i]}
+        for i in range(20)
+    ]
+    rows.append({"time": times[20], "open": 1.1000, "high": 1.1065, "low": 1.0999, "close": 1.1060})
+    h4 = pd.DataFrame(rows)
+    m15 = _m15_ending_at(times[20] + pd.Timedelta(hours=4), 8, 1.1060)
+
+    entry_time = times[19]
+    entry = 1.1000
+
+    from src.indicators.ta import atr_wilder
+
+    atr_now = float(atr_wilder(h4, params.h4_atr_period).iloc[-1])
+    anchor = 1.1060
+    assert anchor - entry >= 2.0 * atr_now          # breakeven trigger reached
+    assert anchor - 3.0 * atr_now < entry           # chandelier alone still below entry
+
+    wide_sl = entry - 0.0500
+    proposal = update_stop("EURUSD", "LONG", entry, entry_time, wide_sl, h4, m15, params)
+    assert proposal is not None
+    assert proposal == pytest.approx(entry + 1.0 * 0.0001)  # entry + spread buffer
 
 
 def test_update_stop_short_direction_mirrors():

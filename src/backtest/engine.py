@@ -30,14 +30,30 @@ WARMUP_H1_BARS = 300
 WARMUP_M15_BARS = 300
 
 
-def assumed_pip_value_per_lot(symbol: str) -> float:
-    """Backtest-only stand-in for symbol_info.trade_tick_value: EURUSD/GBPUSD
-    are quoted directly in USD, so 1 pip on 1.0 lot is always
-    pip_size * contract_size, converted to account-currency cents. The live
-    path (mt5_client.pip_value_per_lot) must never use this — it reads the
-    broker's real tick value/size instead.
+def assumed_pip_value_per_lot(symbol: str, price: float) -> float:
+    """Backtest-only stand-in for symbol_info.trade_tick_value, in
+    account-currency cents per pip per 1.0 lot.
+
+    - USD-quote pairs (EURUSD, GBPUSD, AUDUSD, NZDUSD): pip * contract.
+    - USD-base pairs (USDJPY, USDCAD, USDCHF): pip value is in the quote
+      currency; convert to USD by dividing by the pair's own price.
+    - Crosses (EURJPY, ...) would need a second pair's price — unsupported
+      here; keep them out of backtest configs.
+
+    The live path (mt5_client.pip_value_per_lot) never uses this — it reads
+    the broker's real tick value/size instead.
     """
-    return pip_size(symbol) * CONTRACT_SIZE * CENTS_PER_UNIT
+    base = symbol.upper().rstrip("MCI")  # strip Exness cent/etc. suffixes
+    pip = pip_size(symbol)
+    if base.endswith("USD"):
+        return pip * CONTRACT_SIZE * CENTS_PER_UNIT
+    if base.startswith("USD"):
+        if price <= 0:
+            raise ValueError(f"Need a positive price to value {symbol} pips")
+        return pip * CONTRACT_SIZE / price * CENTS_PER_UNIT
+    raise ValueError(
+        f"Backtest pip-value model supports only USD-quote or USD-base pairs, got {symbol}"
+    )
 
 
 @dataclass
@@ -195,7 +211,7 @@ class BacktestEngine:
         self, position: OpenPosition, ts: pd.Timestamp, exit_price: float, outcome: str
     ) -> None:
         pip = pip_size(position.symbol)
-        pip_value = assumed_pip_value_per_lot(position.symbol)
+        pip_value = assumed_pip_value_per_lot(position.symbol, exit_price)
         price_diff = (exit_price - position.entry) if position.side == "LONG" else (position.entry - exit_price)
         pnl = (price_diff / pip) * pip_value * position.lots
         r_result = pnl / position.risk_amount if position.risk_amount > 0 else 0.0
@@ -320,7 +336,7 @@ class BacktestEngine:
         reject_reason = None
         lots = None
         if signal is not None:
-            account = self._account_state(symbol, ts)
+            account = self._account_state(symbol, ts, price=signal.entry)
             verdict = rm.evaluate(signal, account, self.params)
             if isinstance(verdict, rm.Rejected):
                 reject_reason = verdict.reason
@@ -359,7 +375,7 @@ class BacktestEngine:
     def _assumed_spread_pips(self, symbol: str) -> float:
         return self.params.max_spread_pips.get(symbol, 0.0)
 
-    def _account_state(self, symbol: str, ts: pd.Timestamp) -> rm.AccountState:
+    def _account_state(self, symbol: str, ts: pd.Timestamp, price: float) -> rm.AccountState:
         if getattr(self.params, "kill_switch_enabled", True):
             kill_threshold = self.hwm * (1 - self.params.max_drawdown_kill)
             if not self.kill_switch_triggered and self.equity <= kill_threshold:
@@ -367,7 +383,7 @@ class BacktestEngine:
         else:
             self.kill_switch_triggered = False
 
-        pip_value = assumed_pip_value_per_lot(symbol)
+        pip_value = assumed_pip_value_per_lot(symbol, price)
         symbol_info = rm.SymbolInfo(pip_value_per_lot=pip_value, volume_step=0.01, volume_min=0.01)
 
         return rm.AccountState(

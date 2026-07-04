@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     risk_per_trade: float
     max_open_trades: int
     max_per_symbol: int
+    max_same_currency_bets: int = 1  # 1 = old binary correlation block
     daily_loss_limit: float
     max_drawdown_kill: float
     cooldown_after_loss_min: int
@@ -78,6 +79,10 @@ class Settings(BaseSettings):
     h4_atr_sl_mult: float = 2.0
     h4_trail_atr_mult: float = 3.0
     h4_tp_r_cap: float = 8.0
+    h4_breakeven_after_atr: float = 2.0
+    h4_min_slope_atr_frac: float = 0.0  # |EMA slope| must be >= this * ATR; 0 = off
+    h4_min_atr_percentile: float = 0.0  # skip entries when ATR below this pct rank; 0 = off
+    h4_atr_percentile_lookback: int = 126  # ~21 H4 days for percentile window
 
     backtest_start_equity: float
 

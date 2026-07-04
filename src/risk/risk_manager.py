@@ -94,14 +94,21 @@ def _currency_bets(symbol: str, side: str) -> dict[str, int]:
     return {base: sign, quote: -sign}
 
 
-def _has_correlated_bet(signal: Signal, open_trades: list[OpenTrade]) -> bool:
+def _max_shared_bet_count(signal: Signal, open_trades: list[OpenTrade]) -> int:
+    """How many open trades already hold this signal's most-crowded
+    currency+direction bet (e.g. short-USD). With a multi-pair USD portfolio
+    the cap (max_same_currency_bets) bounds concentration instead of the old
+    binary any-overlap block; cap=1 reproduces the old behavior exactly.
+    """
     new_bets = _currency_bets(signal.symbol, signal.side)
-    for trade in open_trades:
-        existing_bets = _currency_bets(trade.symbol, trade.side)
-        for currency, sign in existing_bets.items():
-            if new_bets.get(currency) == sign:
-                return True
-    return False
+    worst = 0
+    for currency, sign in new_bets.items():
+        count = 0
+        for trade in open_trades:
+            if _currency_bets(trade.symbol, trade.side).get(currency) == sign:
+                count += 1
+        worst = max(worst, count)
+    return worst
 
 
 def _floor_to_step(value: float, step: float) -> float:
@@ -135,7 +142,8 @@ def evaluate(signal: Signal, account: AccountState, params: Any) -> Verdict:
     if open_total >= params.max_open_trades or open_this_symbol >= params.max_per_symbol:
         return Rejected("max_open")
 
-    if _has_correlated_bet(signal, account.open_trades):
+    max_same = int(getattr(params, "max_same_currency_bets", 1))
+    if _max_shared_bet_count(signal, account.open_trades) >= max_same:
         return Rejected("correlation")
 
     last_trade = account.last_trade_by_symbol.get(signal.symbol)

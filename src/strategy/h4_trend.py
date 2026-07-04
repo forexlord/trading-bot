@@ -81,6 +81,32 @@ def resample_h4(h1_df: pd.DataFrame) -> pd.DataFrame:
     return out[["time", "open", "high", "low", "close"]]
 
 
+def _atr_percentile(atr_series: pd.Series, lookback: int) -> float:
+    """Percentile rank (0–100) of the latest ATR within the prior `lookback` bars."""
+    window = atr_series.iloc[-lookback:].dropna()
+    if len(window) < 2:
+        return float("nan")
+    current = float(window.iloc[-1])
+    return float((window.iloc[:-1] < current).sum() / (len(window) - 1) * 100.0)
+
+
+def _passes_entry_filters(
+    slope: float, atr_now: float, atr_h4: pd.Series, params: Any
+) -> bool:
+    """Skip chop: require meaningful EMA slope and sufficient H4 volatility."""
+    min_slope = float(_f(params, "h4_min_slope_atr_frac", 0.0))
+    if min_slope > 0 and abs(slope) < min_slope * atr_now:
+        return False
+
+    min_pct = float(_f(params, "h4_min_atr_percentile", 0.0))
+    if min_pct > 0:
+        lookback = int(_f(params, "h4_atr_percentile_lookback", 126))
+        pct = _atr_percentile(atr_h4, lookback)
+        if np.isnan(pct) or pct < min_pct:
+            return False
+    return True
+
+
 def _regime(h4: pd.DataFrame, params: Any) -> tuple[str, float, float, float]:
     trend_n = int(_f(params, "h4_trend_ema", 50))
     slope_lb = int(_f(params, "h4_slope_lookback", 3))
@@ -151,7 +177,7 @@ def _analyze(symbol: str, h4_df: pd.DataFrame, m15_df: pd.DataFrame, params: Any
         pullback_active=setup_active,
         pullback_age=setup_age,
     )
-    return ctx, h4, atr_now
+    return ctx, h4, atr_now, atr_h4
 
 
 def compute_context(symbol: str, h4_df: pd.DataFrame, m15_df: pd.DataFrame, params: Any) -> Context:
@@ -165,21 +191,29 @@ def evaluate_with_context(
     """Single-pass variant: one indicator computation for both the decision
     log context and the signal. Preferred by the backtest engine.
     """
-    ctx, h4, atr_now = _analyze(symbol, h4_df, m15_df, params)
-    return ctx, _signal_from(symbol, ctx, h4, atr_now, m15_df, params)
+    ctx, h4, atr_now, atr_h4 = _analyze(symbol, h4_df, m15_df, params)
+    return ctx, _signal_from(symbol, ctx, h4, atr_now, atr_h4, m15_df, params)
 
 
 def evaluate(symbol: str, h4_df: pd.DataFrame, m15_df: pd.DataFrame, params: Any) -> Signal | None:
-    ctx, h4, atr_now = _analyze(symbol, h4_df, m15_df, params)
-    return _signal_from(symbol, ctx, h4, atr_now, m15_df, params)
+    ctx, h4, atr_now, atr_h4 = _analyze(symbol, h4_df, m15_df, params)
+    return _signal_from(symbol, ctx, h4, atr_now, atr_h4, m15_df, params)
 
 
 def _signal_from(
-    symbol: str, ctx: Context, h4: pd.DataFrame, atr_now: float, m15_df: pd.DataFrame, params: Any
+    symbol: str,
+    ctx: Context,
+    h4: pd.DataFrame,
+    atr_now: float,
+    atr_h4: pd.Series,
+    m15_df: pd.DataFrame,
+    params: Any,
 ) -> Signal | None:
     if ctx.regime == "NONE" or not ctx.pullback_active:
         return None
     if np.isnan(atr_now) or atr_now <= 0:
+        return None
+    if not _passes_entry_filters(ctx.ema50_slope, atr_now, atr_h4, params):
         return None
     # Act only on the M15 close that completed this H4 bar — otherwise the
     # same breakout would re-fire on all 16 M15 closes inside the next H4 bar.
@@ -246,10 +280,21 @@ def update_stop(
     if since.empty:
         since = h4.tail(1)
 
+    # Breakeven: once the trade has run h4_breakeven_after_atr * ATR in
+    # favor, refuse to let it turn back into a full loss — lock the stop at
+    # entry +/- the spread buffer. 0 disables. Motivated by the backtest MFE
+    # data: the losing tail contained trades that had been >2 ATR in profit.
+    be_after = float(_f(params, "h4_breakeven_after_atr", 2.0))
+    be_buffer = float(_f(params, "spread_buffer_pips", 1.0)) * pip_size(symbol)
+
     if side == "LONG":
         anchor = float(since["close"].max())
         proposal = anchor - trail_mult * atr_now
+        if be_after > 0 and anchor - entry >= be_after * atr_now:
+            proposal = max(proposal, entry + be_buffer)
         return proposal if proposal > current_sl else None
     anchor = float(since["close"].min())
     proposal = anchor + trail_mult * atr_now
+    if be_after > 0 and entry - anchor >= be_after * atr_now:
+        proposal = min(proposal, entry - be_buffer)
     return proposal if proposal < current_sl else None

@@ -157,6 +157,25 @@ def test_correlation_allows_opposite_usd_bet_as_a_hedge():
     assert isinstance(verdict, Approved)
 
 
+def test_correlation_cap_allows_second_bet_then_blocks_third():
+    # max_same_currency_bets=2: one open short-USD trade -> second allowed,
+    # two open short-USD trades -> third rejected.
+    params = deepcopy(PARAMS)
+    params.max_same_currency_bets = 2
+    params.max_open_trades = 4
+    params.max_spread_pips = {"EURUSD": 1.5, "GBPUSD": 2.0, "AUDUSD": 2.0}
+
+    one_open = make_account(open_trades=[OpenTrade(symbol="EURUSD", side="LONG")])
+    assert isinstance(evaluate(make_signal(symbol="GBPUSD", side="LONG"), one_open, params), Approved)
+
+    two_open = make_account(
+        open_trades=[OpenTrade(symbol="EURUSD", side="LONG"), OpenTrade(symbol="GBPUSD", side="LONG")]
+    )
+    verdict = evaluate(make_signal(symbol="AUDUSD", side="LONG"), two_open, params)
+    assert isinstance(verdict, Rejected)
+    assert verdict.reason == "correlation"
+
+
 def test_cooldown_rejects_within_window_after_a_loss():
     account = make_account(
         last_trade_by_symbol={
