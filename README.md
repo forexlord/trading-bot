@@ -7,11 +7,23 @@ RPyC bridge, against an Exness Standard Cent demo account.
 
 Architecture: **Market Data → Strategy Engine → Risk Manager → Execution**.
 Strategies live under [`src/strategy/`](src/strategy/) and are selected via
-`strategy:` in [`config/settings.yaml`](config/settings.yaml)
-(`trend_pullback` or `breakout_trend`). Risk
+`strategy:` in [`config/settings.yaml`](config/settings.yaml). Risk
 ([src/risk/risk_manager.py](src/risk/risk_manager.py)) is a pure function of
 data with zero MT5 imports, so the backtester and the live bot run the *exact
 same* strategy/risk code — they only differ in data source and executor.
+
+### Strategies
+
+- `h4_trend` (default) — Turtle-adapted H4 Donchian trend-following: EMA(50)
+  regime filter, entry on a 20-bar H4 channel break at H4 closes only,
+  2×ATR initial stop, 3×ATR chandelier trail (broker SL is ratcheted up,
+  never loosened), far 8R cap. Holds for days. Rationale: on M15, spread +
+  slippage consumed ~19% of R per trade and both M15 strategies tested at
+  break-even gross / strongly negative net; H4 stops cut the cost drag to
+  ~4-5% of R, and trend-following evidence lives at daily-ish horizons.
+- `breakout_trend` — M15 Donchian breakout, H1 filter. Tested on 2y
+  EURUSD/GBPUSD: PF 0.73, −75.7% max DD. Kept for comparison runs only.
+- `trend_pullback` — v1 M15 pullback. Kept for comparison runs only.
 
 ## Prerequisites
 

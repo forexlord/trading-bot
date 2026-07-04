@@ -70,6 +70,15 @@ class Settings(BaseSettings):
     breakout_rsi_long_max: float = 70.0
     breakout_rsi_short_min: float = 30.0
 
+    # h4_trend (Turtle-adapted Donchian on H4 resampled from H1)
+    h4_breakout_lookback: int = 20
+    h4_trend_ema: int = 50
+    h4_slope_lookback: int = 3
+    h4_atr_period: int = 14
+    h4_atr_sl_mult: float = 2.0
+    h4_trail_atr_mult: float = 3.0
+    h4_tp_r_cap: float = 8.0
+
     backtest_start_equity: float
 
     kill_switch_enabled: bool = True

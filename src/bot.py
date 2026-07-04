@@ -11,6 +11,8 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import pandas as pd
+
 from src.config import Settings, load_secrets, load_settings
 from src.data.mt5_client import MT5Client
 from src.data.store import Store
@@ -167,12 +169,64 @@ class Bot:
     # -- exit polling ---------------------------------------------------------
 
     def _check_exits(self, now: datetime) -> None:
+        if self.paper:
+            self._check_exits_paper(now)
+            return
         live_by_symbol = {p["symbol"]: p for p in self.client.open_positions()}
         for symbol, trade in list(self.state.open_trades.items()):
             if symbol in live_by_symbol:
                 self._update_excursion(symbol, trade)
+                self._maybe_trail(symbol, trade, live_by_symbol[symbol])
                 continue
             self._finalize_closed_trade(symbol, trade, now)
+
+    def _check_exits_paper(self, now: datetime) -> None:
+        """Paper trades have no MT5 positions; simulate SL/TP against the
+        current tick instead of positions_get (which would instantly
+        'close' every paper trade).
+        """
+        for symbol, trade in list(self.state.open_trades.items()):
+            tick = self.client.symbol_info_tick(symbol)
+            price = tick["bid"] if trade.side == "LONG" else tick["ask"]
+            if trade.side == "LONG":
+                hit_sl, hit_tp = price <= trade.sl, price >= trade.tp
+            else:
+                hit_sl, hit_tp = price >= trade.sl, price <= trade.tp
+            if hit_sl or hit_tp:
+                outcome = "SL" if hit_sl else "TP"  # pessimistic if both
+                exit_price = trade.sl if hit_sl else trade.tp
+                self._finalize_closed_trade(symbol, trade, now, outcome=outcome, exit_price=exit_price)
+            else:
+                self._update_excursion(symbol, trade)
+                self._maybe_trail(symbol, trade, position=None)
+
+    def _maybe_trail(self, symbol: str, trade: TradeState, position: dict | None) -> None:
+        """Apply the strategy's trailing-stop proposal (ratchet only). In live
+        mode the broker SL is modified too; in paper mode only local state."""
+        update_fn = getattr(self.strat, "update_stop", None)
+        if update_fn is None:
+            return
+        h1 = self._closed_rates(symbol, "H1")
+        m15 = self._closed_rates(symbol, "M15")
+        if h1.empty or m15.empty:
+            return
+        proposal = update_fn(
+            symbol, trade.side, trade.entry, trade.entry_time, trade.sl, h1, m15, self.settings
+        )
+        if proposal is None:
+            return
+        tighter = (trade.side == "LONG" and proposal > trade.sl) or (
+            trade.side == "SHORT" and proposal < trade.sl
+        )
+        if not tighter:
+            return
+        if position is not None:
+            result = self.broker.modify_sl(position, float(proposal))
+            if not result.success:
+                self.logger.error("Trailing SL modify failed for %s: %s", symbol, result.comment)
+                return
+        trade.sl = float(proposal)
+        self.logger.info("Trailed %s %s SL to %.5f", symbol, trade.side, trade.sl)
 
     def _update_excursion(self, symbol: str, trade: TradeState) -> None:
         tick = self.client.symbol_info_tick(symbol)
@@ -185,12 +239,21 @@ class Bot:
             trade.mae_pips = max(trade.mae_pips, (price - trade.entry) / pip)
             trade.mfe_pips = max(trade.mfe_pips, (trade.entry - price) / pip)
 
-    def _finalize_closed_trade(self, symbol: str, trade: TradeState, now: datetime) -> None:
+    def _finalize_closed_trade(
+        self,
+        symbol: str,
+        trade: TradeState,
+        now: datetime,
+        outcome: str | None = None,
+        exit_price: float | None = None,
+    ) -> None:
         pip = self.strat.pip_size(symbol)
-        tick = self.client.symbol_info_tick(symbol)
-        last_price = tick["bid"] if trade.side == "LONG" else tick["ask"]
-        outcome = "TP" if abs(last_price - trade.tp) < abs(last_price - trade.sl) else "SL"
-        exit_price = trade.tp if outcome == "TP" else trade.sl
+        if outcome is None:
+            tick = self.client.symbol_info_tick(symbol)
+            last_price = tick["bid"] if trade.side == "LONG" else tick["ask"]
+            outcome = "TP" if abs(last_price - trade.tp) < abs(last_price - trade.sl) else "SL"
+        if exit_price is None:
+            exit_price = trade.tp if outcome == "TP" else trade.sl
 
         pip_value = self.client.pip_value_per_lot(symbol, pip)
         price_diff = (exit_price - trade.entry) if trade.side == "LONG" else (trade.entry - exit_price)
@@ -226,9 +289,17 @@ class Bot:
 
     # -- evaluation / entries -------------------------------------------------
 
+    def _closed_rates(self, symbol: str, timeframe: str) -> "pd.DataFrame":
+        """Fetch candles and drop the last row: MT5 position 0 is the current
+        FORMING bar, and strategies must only ever see closed candles (the
+        backtester never sees forming bars — live must match).
+        """
+        df = self.client.copy_rates(symbol, timeframe, HISTORY_BARS)
+        return df.iloc[:-1] if len(df) else df
+
     def _evaluate_symbol(self, symbol: str, now: datetime, equity: float, balance: float) -> None:
-        h1 = self.client.copy_rates(symbol, "H1", HISTORY_BARS)
-        m15 = self.client.copy_rates(symbol, "M15", HISTORY_BARS)
+        h1 = self._closed_rates(symbol, "H1")
+        m15 = self._closed_rates(symbol, "M15")
         self.store.upsert_candles(symbol, "H1", h1)
         self.store.upsert_candles(symbol, "M15", m15)
 

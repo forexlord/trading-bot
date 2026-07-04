@@ -125,6 +125,7 @@ class BacktestEngine:
                 for symbol, idx in self._symbols_at(ts).items():
                     self._process_exits(symbol, idx, ts)
                     self._process_eval(symbol, idx, ts)
+                    self._update_trailing(symbol, idx, ts)
                 self._maybe_log_equity(ts)
                 if i > 0 and i % 5000 == 0:
                     logger.info("Backtest progress: %d / %d (%.0f%%)", i, n, 100.0 * i / n)
@@ -226,16 +227,53 @@ class BacktestEngine:
     def _open_risk(self) -> float:
         return sum(p.risk_amount for p in self.open_trades.values())
 
+    def _update_trailing(self, symbol: str, idx: int, ts: pd.Timestamp) -> None:
+        """Apply the strategy's trailing-stop proposal (if it has one) at this
+        candle close. Ratchet only: the stop may tighten, never loosen. Runs
+        after exits/eval so the new stop applies from the NEXT candle — same
+        as live, where the SL modify lands after the bar closes.
+        Gated to H1 boundaries: trailing anchors move at most once per H1/H4
+        bar, so recomputing on all 4 intra-hour M15 closes is pure waste.
+        """
+        update_fn = getattr(self.strat, "update_stop", None)
+        if update_fn is None or ts.minute != 45:
+            return
+        position = self.open_trades.get(symbol)
+        if position is None:
+            return
+
+        h1_slice, m15_slice = self._slices(symbol, idx, ts)
+        proposal = update_fn(
+            symbol, position.side, position.entry, position.entry_time,
+            position.sl, h1_slice, m15_slice, self.params,
+        )
+        if proposal is None:
+            return
+        if position.side == "LONG" and proposal > position.sl:
+            position.sl = float(proposal)
+        elif position.side == "SHORT" and proposal < position.sl:
+            position.sl = float(proposal)
+
     # -- evaluation / entries -------------------------------------------------
 
-    def _process_eval(self, symbol: str, idx: int, ts: pd.Timestamp) -> None:
+    def _slices(self, symbol: str, idx: int, ts: pd.Timestamp) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Data visible at the close of the M15 bar stamped ts ("now" = ts+15min).
+
+        Lookahead guard: an H1 bar stamped H closes at H+1h, so it is only
+        visible when H+1h <= ts+15min, i.e. H <= ts-45min. Including bars up
+        to ts (the old behavior) leaked up to 45 minutes of the H1 close into
+        the strategy — live could never see that.
+        """
         sd = self.data[symbol]
-        # Binary search for last H1 bar at-or-before ts (was a full boolean scan).
         h1_times = self._h1_times[symbol]
-        h1_end = int(np.searchsorted(h1_times, ts, side="right"))
+        h1_end = int(np.searchsorted(h1_times, ts - pd.Timedelta(minutes=45), side="right"))
         h1_start = max(0, h1_end - WARMUP_H1_BARS)
         h1_slice = sd.h1.iloc[h1_start:h1_end]
         m15_slice = sd.m15.iloc[max(0, idx - WARMUP_M15_BARS + 1) : idx + 1]
+        return h1_slice, m15_slice
+
+    def _process_eval(self, symbol: str, idx: int, ts: pd.Timestamp) -> None:
+        h1_slice, m15_slice = self._slices(symbol, idx, ts)
 
         if h1_slice.empty or len(m15_slice) < 2:
             self._log_eval(symbol, ts, Context("NONE", float("nan"), float("nan"), float("nan"),

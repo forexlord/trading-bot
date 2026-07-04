@@ -32,6 +32,10 @@ class PaperBroker:
         price = (tick["bid"] - slip) if is_long else (tick["ask"] + slip)
         return FillResult(success=True, order_id=self._next_id(), price=price, retcode=0, comment="paper close")
 
+    def modify_sl(self, position: dict, new_sl: float) -> FillResult:
+        # Paper trades track SL in local state only — nothing to send.
+        return FillResult(success=True, order_id=None, price=None, retcode=0, comment="paper modify_sl")
+
     def _next_id(self) -> int:
         order_id = self._next_order_id
         self._next_order_id += 1

@@ -66,6 +66,21 @@ class LiveBroker:
         }
         return self._send(request, mt5)
 
+    def modify_sl(self, position: dict, new_sl: float) -> FillResult:
+        """Tighten the stop on an existing position (trailing). This is a
+        modification of an already-protected position — the no-naked-orders
+        rule (SL+TP attached at entry) still holds.
+        """
+        mt5 = self._client.raw
+        request = {
+            "action": mt5.TRADE_ACTION_SLTP,
+            "symbol": position["symbol"],
+            "position": position["ticket"],
+            "sl": new_sl,
+            "tp": position["tp"],  # keep the existing disaster-cap TP
+        }
+        return self._send(request, mt5)
+
     def _send(self, request: dict, mt5) -> FillResult:
         result = self._client.order_send(request)
         success = result.get("retcode") == mt5.TRADE_RETCODE_DONE
