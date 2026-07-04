@@ -80,9 +80,17 @@ class Settings(BaseSettings):
     h4_trail_atr_mult: float = 3.0
     h4_tp_r_cap: float = 8.0
     h4_breakeven_after_atr: float = 2.0
-    h4_min_slope_atr_frac: float = 0.0  # |EMA slope| must be >= this * ATR; 0 = off
-    h4_min_atr_percentile: float = 0.0  # skip entries when ATR below this pct rank; 0 = off
-    h4_atr_percentile_lookback: int = 126  # ~21 H4 days for percentile window
+    h4_min_slope_atr_frac: float = 0.0
+    h4_min_atr_percentile: float = 0.0
+    h4_atr_percentile_lookback: int = 126
+
+    # h4_pullback — dip/rally entries in H4 trends, fixed TP
+    h4_pullback_ema: int = 20
+    h4_pullback_lookback: int = 12
+    h4_pullback_expiry: int = 4
+    h4_pullback_extension_atr: float = 1.0
+    h4_pullback_tp_r: float = 2.0
+    h4_swing_lookback: int = 8
 
     backtest_start_equity: float
 
