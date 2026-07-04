@@ -22,6 +22,7 @@ PARAMS = SimpleNamespace(
     h4_pullback_tp_cap=8.0,
     h4_pullback_runners=True,
     h4_trail_start_atr=1.0,
+    h4_trail_min_lock_r=1.25,
     h4_trail_atr_mult=2.5,
     spread_buffer_pips=1.0,
 )
@@ -143,6 +144,6 @@ def test_update_stop_trails_after_one_atr_in_favor():
     atr_now = float(atr_wilder(h4, PARAMS.h4_atr_period).iloc[-1])
     assert 1.1055 - 1.1000 >= PARAMS.h4_trail_start_atr * atr_now
 
-    proposal = update_stop("EURUSD", "LONG", 1.1000, times[20], 1.0950, h4, m15, PARAMS)
+    proposal = update_stop("EURUSD", "LONG", 1.1000, times[20], 1.0950, h4, m15, PARAMS, initial_sl=1.0950)
     assert proposal is not None
-    assert proposal > 1.1000
+    assert proposal >= 1.1000 + 1.25 * 0.005  # at least 1.25R above entry

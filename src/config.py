@@ -93,7 +93,8 @@ class Settings(BaseSettings):
     h4_pullback_tp_cap: float = 8.0
     h4_pullback_runners: bool = True  # far TP + trail exit (vs fixed tp_r)
     h4_trail_start_atr: float = 1.0
-    h4_trail_min_lock_atr: float = 0.75  # minimum profit locked once trail is active
+    h4_trail_min_lock_r: float = 1.25  # min profit (in R) once runner trail is active
+    h4_max_sl_atr: float = 1.5  # cap initial stop width on h4_pullback
     h4_swing_lookback: int = 8
     h4_pullback_max_age: int = 2
 

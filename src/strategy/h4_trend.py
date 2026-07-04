@@ -254,6 +254,8 @@ def update_stop(
     h4_df: pd.DataFrame,
     m15_df: pd.DataFrame,
     params: Any,
+    *,
+    initial_sl: float | None = None,
 ) -> float | None:
     """Chandelier trail: highest (lowest) H4 close since entry -/+ trail*ATR.
 

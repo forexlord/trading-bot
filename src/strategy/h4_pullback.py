@@ -251,6 +251,8 @@ def _signal_from(
         if np.isnan(swl):
             return None
         sl = min(swl - spread_buffer, entry - sl_mult * atr_price)
+        max_sl_atr = float(_f(params, "h4_max_sl_atr", 1.5))
+        sl = max(sl, entry - max_sl_atr * atr_price)
         if sl >= entry:
             return None
         risk = entry - sl
@@ -274,6 +276,8 @@ def _signal_from(
     if np.isnan(swh):
         return None
     sl = max(swh + spread_buffer, entry + sl_mult * atr_price)
+    max_sl_atr = float(_f(params, "h4_max_sl_atr", 1.5))
+    sl = min(sl, entry + max_sl_atr * atr_price)
     if sl <= entry:
         return None
     risk = sl - entry
@@ -297,6 +301,8 @@ def update_stop(
     h4_df: pd.DataFrame,
     m15_df: pd.DataFrame,
     params: Any,
+    *,
+    initial_sl: float | None = None,
 ) -> float | None:
     """Chandelier trail + breakeven, ONLY after the trade is in profit.
 
@@ -326,19 +332,29 @@ def update_stop(
         since = h4.tail(1)
 
     min_move = trail_start * atr_now
-    min_lock_atr = float(_f(params, "h4_trail_min_lock_atr", 0.75))
+    min_lock_r = float(_f(params, "h4_trail_min_lock_r", 1.25))
+    ref_sl = initial_sl if initial_sl is not None else current_sl
+    risk_px = abs(entry - ref_sl) if side == "LONG" else abs(ref_sl - entry)
+    if risk_px <= 0:
+        return None
 
     if side == "LONG":
         anchor = float(since["close"].max())
         if anchor - entry < min_move:
-            return None  # not winning yet
+            return None
         proposal = anchor - trail_mult * atr_now
-        proposal = max(proposal, entry + be_buffer, entry + min_lock_atr * atr_now)
+        floor = entry + be_buffer
+        if min_lock_r > 0:
+            floor = max(floor, entry + min_lock_r * risk_px)
+        proposal = max(proposal, floor)
         return proposal if proposal > current_sl else None
 
     anchor = float(since["close"].min())
     if entry - anchor < min_move:
         return None
     proposal = anchor + trail_mult * atr_now
-    proposal = min(proposal, entry - be_buffer, entry - min_lock_atr * atr_now)
+    ceiling = entry - be_buffer
+    if min_lock_r > 0:
+        ceiling = min(ceiling, entry - min_lock_r * risk_px)
+    proposal = min(proposal, ceiling)
     return proposal if proposal < current_sl else None

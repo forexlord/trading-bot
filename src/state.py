@@ -32,6 +32,7 @@ class TradeState:
     risk_amount: float
     entry_time: str  # ISO 8601
     entry_context: dict
+    initial_sl: float = 0.0
     mae_pips: float = 0.0
     mfe_pips: float = 0.0
 

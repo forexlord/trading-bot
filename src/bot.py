@@ -213,7 +213,8 @@ class Bot:
         if htf.empty or m15.empty:
             return
         proposal = update_fn(
-            symbol, trade.side, trade.entry, trade.entry_time, trade.sl, htf, m15, self.settings
+            symbol, trade.side, trade.entry, trade.entry_time, trade.sl, htf, m15, self.settings,
+            initial_sl=trade.initial_sl or trade.sl,
         )
         if proposal is None:
             return
@@ -405,6 +406,7 @@ class Bot:
             risk_amount=verdict.risk_amount,
             entry_time=now.isoformat(),
             entry_context=entry_context,
+            initial_sl=signal.sl,
         )
         self.state.record_trade_open(trade)
         self.store.record_trade_entry(

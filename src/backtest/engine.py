@@ -9,6 +9,7 @@ been hit first (pessimistic).
 """
 from __future__ import annotations
 
+import inspect
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -69,6 +70,7 @@ class OpenPosition:
     risk_amount: float
     entry_time: pd.Timestamp
     entry_context: dict
+    initial_sl: float = 0.0  # opening stop; used by runner trail min-R lock
     mae_pips: float = 0.0
     mfe_pips: float = 0.0
 
@@ -273,9 +275,13 @@ class BacktestEngine:
         # HTF-close strategies: the trail anchor/ATR only move on HTF closes.
         if self._decides_on_htf_close and not self._is_htf_decision_bar(h1_slice, ts):
             return
+        trail_kwargs: dict = {}
+        if "initial_sl" in inspect.signature(update_fn).parameters:
+            trail_kwargs["initial_sl"] = position.initial_sl
         proposal = update_fn(
             symbol, position.side, position.entry, position.entry_time,
             position.sl, h1_slice, m15_slice, self.params,
+            **trail_kwargs,
         )
         if proposal is None:
             return
@@ -421,6 +427,7 @@ class BacktestEngine:
             risk_amount=verdict.risk_amount,
             entry_time=ts,
             entry_context=vars(signal.context) if signal.context else {},
+            initial_sl=signal.sl,
         )
         self.open_trades[signal.symbol] = position
         self.last_entry_time_by_symbol[signal.symbol] = ts
