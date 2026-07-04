@@ -47,21 +47,27 @@ def load_reject_reason_counts(
 
 def compute_stats(trades: pd.DataFrame, equity_curve: pd.DataFrame) -> dict:
     if trades.empty or "exit_time" not in trades.columns:
-        return {"trade_count": 0}
+        return {"trade_count": 0, "wins": 0, "losses": 0, "gross_win": 0.0, "gross_loss": 0.0, "net_pnl": 0.0}
 
     closed = trades[trades["exit_time"].notna()].copy()
     stats: dict = {"trade_count": len(closed)}
     if closed.empty:
+        stats.update(wins=0, losses=0, gross_win=0.0, gross_loss=0.0, net_pnl=0.0)
         return stats
 
     wins = closed[closed["pnl"] > 0]
     losses = closed[closed["pnl"] <= 0]
+    stats["wins"] = int(len(wins))
+    stats["losses"] = int(len(losses))
     stats["win_rate"] = len(wins) / len(closed)
     stats["avg_win"] = float(wins["pnl"].mean()) if not wins.empty else 0.0
     stats["avg_loss"] = float(losses["pnl"].mean()) if not losses.empty else 0.0
 
-    gross_win = float(wins["pnl"].sum())
-    gross_loss = float(-losses["pnl"].sum())
+    gross_win = float(wins["pnl"].sum()) if not wins.empty else 0.0
+    gross_loss = float(-losses["pnl"].sum()) if not losses.empty else 0.0
+    stats["gross_win"] = gross_win
+    stats["gross_loss"] = gross_loss
+    stats["net_pnl"] = float(closed["pnl"].sum())
     stats["profit_factor"] = (gross_win / gross_loss) if gross_loss > 0 else float("inf")
 
     if not equity_curve.empty:
@@ -132,13 +138,18 @@ def print_report_from_frames(
         print("No closed trades in range.")
     else:
         dd = stats["max_drawdown_pct"]
+        # Account units are Exness cents (1 unit = $0.01).
         print(
             tabulate(
                 [
                     ["Trades", stats["trade_count"]],
-                    ["Win rate", f"{stats['win_rate']:.1%}"],
-                    ["Avg win", f"{stats['avg_win']:.2f}"],
-                    ["Avg loss", f"{stats['avg_loss']:.2f}"],
+                    ["Wins", f"{stats['wins']} ({stats['win_rate']:.1%})"],
+                    ["Losses", f"{stats['losses']} ({1 - stats['win_rate']:.1%})"],
+                    ["Total won", f"{stats['gross_win']:.2f} cents (${stats['gross_win'] / 100:.2f})"],
+                    ["Total lost", f"{stats['gross_loss']:.2f} cents (${stats['gross_loss'] / 100:.2f})"],
+                    ["Net PnL", f"{stats['net_pnl']:.2f} cents (${stats['net_pnl'] / 100:.2f})"],
+                    ["Avg win", f"{stats['avg_win']:.2f} (${stats['avg_win'] / 100:.2f})"],
+                    ["Avg loss", f"{stats['avg_loss']:.2f} (${stats['avg_loss'] / 100:.2f})"],
                     ["Profit factor", f"{stats['profit_factor']:.2f}"],
                     ["Max drawdown", f"{dd:.1%}" if dd is not None else "n/a"],
                     ["Longest loss streak", stats["longest_loss_streak"]],
