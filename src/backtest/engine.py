@@ -103,6 +103,13 @@ class BacktestEngine:
         # _SymbolData.h1 carries bars of THIS timeframe — callers must load it.
         self.htf: str = getattr(self.strat, "HTF", "H1")
         self._htf_delta = pd.Timedelta(minutes={"H1": 60, "H4": 240}[self.htf])
+        # Strategies that only decide on HTF closes let us skip the strategy
+        # call (and decision-log row) on every other M15 bar — for H4 that is
+        # 15 of every 16 bars. Uses actual bar times, so any broker HTF
+        # alignment works.
+        self._decides_on_htf_close = bool(getattr(self.strat, "DECIDES_ON_HTF_CLOSE", False))
+        # Single-pass context+signal, if the strategy offers it (halves work).
+        self._eval_with_ctx = getattr(self.strat, "evaluate_with_context", None)
         self.decision_log = DecisionLogger(log_dir)
         self.trade_log = TradeLogger(log_dir)
         self.equity_log = EquityLogger(log_dir)
@@ -247,6 +254,9 @@ class BacktestEngine:
             return
 
         h1_slice, m15_slice = self._slices(symbol, idx, ts)
+        # HTF-close strategies: the trail anchor/ATR only move on HTF closes.
+        if self._decides_on_htf_close and not self._is_htf_decision_bar(h1_slice, ts):
+            return
         proposal = update_fn(
             symbol, position.side, position.entry, position.entry_time,
             position.sl, h1_slice, m15_slice, self.params,
@@ -278,8 +288,21 @@ class BacktestEngine:
         m15_slice = sd.m15.iloc[max(0, idx - WARMUP_M15_BARS + 1) : idx + 1]
         return h1_slice, m15_slice
 
+    def _is_htf_decision_bar(self, h1_slice: pd.DataFrame, ts: pd.Timestamp) -> bool:
+        """True when the M15 bar stamped ts closes exactly at the close of the
+        newest visible HTF bar — the only bars an HTF-close strategy acts on."""
+        if h1_slice.empty:
+            return False
+        last_htf_time = h1_slice["time"].iloc[-1]
+        return bool(last_htf_time + self._htf_delta == ts + pd.Timedelta(minutes=15))
+
     def _process_eval(self, symbol: str, idx: int, ts: pd.Timestamp) -> None:
         h1_slice, m15_slice = self._slices(symbol, idx, ts)
+
+        # HTF-close strategies: nothing can happen off-boundary — skip the
+        # strategy call AND the log row (16x fewer of both for H4).
+        if self._decides_on_htf_close and not self._is_htf_decision_bar(h1_slice, ts):
+            return
 
         if h1_slice.empty or len(m15_slice) < 2:
             self._log_eval(symbol, ts, Context("NONE", float("nan"), float("nan"), float("nan"),
@@ -287,8 +310,11 @@ class BacktestEngine:
                                                        False, None), None, None, None)
             return
 
-        ctx = self.strat.compute_context(symbol, h1_slice, m15_slice, self.params)
-        signal = self.strat.evaluate(symbol, h1_slice, m15_slice, self.params)
+        if self._eval_with_ctx is not None:
+            ctx, signal = self._eval_with_ctx(symbol, h1_slice, m15_slice, self.params)
+        else:
+            ctx = self.strat.compute_context(symbol, h1_slice, m15_slice, self.params)
+            signal = self.strat.evaluate(symbol, h1_slice, m15_slice, self.params)
 
         verdict = None
         reject_reason = None

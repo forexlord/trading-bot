@@ -37,11 +37,19 @@ import pandas as pd
 from src.indicators.ta import atr_wilder, ema
 from src.strategy.common import Context, Signal, pip_size
 
-__all__ = ["Context", "Signal", "pip_size", "compute_context", "evaluate", "update_stop", "HTF"]
+__all__ = [
+    "Context", "Signal", "pip_size", "compute_context", "evaluate",
+    "evaluate_with_context", "update_stop", "HTF", "DECIDES_ON_HTF_CLOSE",
+]
 
 # Higher timeframe this strategy consumes in the first dataframe argument.
 # The engine/bot/run_backtest read this and supply native H4 candles.
 HTF = "H4"
+
+# Decisions happen only on the M15 close that completes an HTF bar. The
+# backtest engine uses this to skip strategy calls (and decision-log rows)
+# on the other 15 of every 16 M15 bars.
+DECIDES_ON_HTF_CLOSE = True
 
 H4 = pd.Timedelta(hours=4)
 H1 = pd.Timedelta(hours=1)
@@ -151,9 +159,24 @@ def compute_context(symbol: str, h4_df: pd.DataFrame, m15_df: pd.DataFrame, para
     return ctx
 
 
+def evaluate_with_context(
+    symbol: str, h4_df: pd.DataFrame, m15_df: pd.DataFrame, params: Any
+) -> tuple[Context, Signal | None]:
+    """Single-pass variant: one indicator computation for both the decision
+    log context and the signal. Preferred by the backtest engine.
+    """
+    ctx, h4, atr_now = _analyze(symbol, h4_df, m15_df, params)
+    return ctx, _signal_from(symbol, ctx, h4, atr_now, m15_df, params)
+
+
 def evaluate(symbol: str, h4_df: pd.DataFrame, m15_df: pd.DataFrame, params: Any) -> Signal | None:
     ctx, h4, atr_now = _analyze(symbol, h4_df, m15_df, params)
+    return _signal_from(symbol, ctx, h4, atr_now, m15_df, params)
 
+
+def _signal_from(
+    symbol: str, ctx: Context, h4: pd.DataFrame, atr_now: float, m15_df: pd.DataFrame, params: Any
+) -> Signal | None:
     if ctx.regime == "NONE" or not ctx.pullback_active:
         return None
     if np.isnan(atr_now) or atr_now <= 0:

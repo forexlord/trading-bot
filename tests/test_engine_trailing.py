@@ -150,6 +150,56 @@ def test_h1_slice_excludes_bars_not_yet_closed(tmp_path):
     assert h1_slice_b["time"].max() == pd.Timestamp("2024-01-02 10:00", tz="UTC")
 
 
+def test_htf_close_strategy_skips_eval_off_boundary(tmp_path):
+    """DECIDES_ON_HTF_CLOSE strategies must only be called (and logged) on
+    the M15 bar that completes an HTF bar."""
+
+    class _CountingStrat:
+        HTF = "H4"
+        DECIDES_ON_HTF_CLOSE = True
+        calls = 0
+
+        @staticmethod
+        def pip_size(symbol):
+            return 0.0001
+
+        def evaluate_with_context(self, symbol, h1_df, m15_df, params):
+            _CountingStrat.calls += 1
+            from src.strategy.common import Context
+            ctx = Context("NONE", 1.1, 1.1, 0.0, 1.1, 1.1, 50.0, 10.0, False, None)
+            return ctx, None
+
+    h4 = pd.DataFrame(
+        {
+            "time": pd.date_range("2024-01-02 00:00", periods=3, freq="4h", tz="UTC"),  # 00,04,08
+            "open": 1.10, "high": 1.11, "low": 1.09, "close": 1.10,
+        }
+    )
+    # 11:45 closes at 12:00 = H4 boundary (08:00 bar completes); 11:15 does not.
+    m15 = _m15(
+        [
+            ("2024-01-02 11:15", 1.1000, 1.1010, 1.0990, 1.1005),
+            ("2024-01-02 11:45", 1.1000, 1.1010, 1.0990, 1.1005),
+        ]
+    )
+    engine = BacktestEngine(
+        data={"EURUSD": _SymbolData(h1=h4, m15=m15)},
+        params=_params(strategy="h4_trend"),
+        log_dir=str(tmp_path),
+        start_equity=400000.0,
+    )
+    strat = _CountingStrat()
+    engine.strat = strat
+    engine._decides_on_htf_close = True
+    engine._eval_with_ctx = strat.evaluate_with_context
+
+    engine._process_eval("EURUSD", 0, m15["time"].iloc[0])  # off-boundary
+    assert _CountingStrat.calls == 0
+
+    engine._process_eval("EURUSD", 1, m15["time"].iloc[1])  # boundary
+    assert _CountingStrat.calls == 1
+
+
 def test_h4_slice_excludes_bars_not_yet_closed(tmp_path):
     # With strategy=h4_trend the higher-timeframe slot carries H4 bars.
     # The 08:00 H4 bar closes at 12:00: invisible at the 11:30 M15 close,

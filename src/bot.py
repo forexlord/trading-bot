@@ -308,10 +308,14 @@ class Bot:
         if htf.empty or len(m15) < 2:
             return
 
-        ctx = self.strat.compute_context(symbol, htf, m15, self.settings)
-        signal = None
-        if symbol not in self.state.open_trades:
-            signal = self.strat.evaluate(symbol, htf, m15, self.settings)
+        eval_with_ctx = getattr(self.strat, "evaluate_with_context", None)
+        if eval_with_ctx is not None:
+            ctx, signal = eval_with_ctx(symbol, htf, m15, self.settings)
+        else:
+            ctx = self.strat.compute_context(symbol, htf, m15, self.settings)
+            signal = self.strat.evaluate(symbol, htf, m15, self.settings) if symbol not in self.state.open_trades else None
+        if symbol in self.state.open_trades:
+            signal = None
 
         pip = self.strat.pip_size(symbol)
         spread_pips = self.client.spread_pips(symbol, pip)
