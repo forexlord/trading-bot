@@ -326,18 +326,19 @@ def update_stop(
         since = h4.tail(1)
 
     min_move = trail_start * atr_now
+    min_lock_atr = float(_f(params, "h4_trail_min_lock_atr", 0.75))
 
     if side == "LONG":
         anchor = float(since["close"].max())
         if anchor - entry < min_move:
             return None  # not winning yet
         proposal = anchor - trail_mult * atr_now
-        proposal = max(proposal, entry + be_buffer)
+        proposal = max(proposal, entry + be_buffer, entry + min_lock_atr * atr_now)
         return proposal if proposal > current_sl else None
 
     anchor = float(since["close"].min())
     if entry - anchor < min_move:
         return None
     proposal = anchor + trail_mult * atr_now
-    proposal = min(proposal, entry - be_buffer)
+    proposal = min(proposal, entry - be_buffer, entry - min_lock_atr * atr_now)
     return proposal if proposal < current_sl else None

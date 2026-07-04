@@ -1,24 +1,20 @@
 # Forex bot configuration.
 # Kill switch: default on. Override with KILL_SWITCH_ENABLED=false in .env for research only.
 
-# Exness Standard Cent uses the "m" suffix (EURUSDm / GBPUSDm).
-# USD-quote and USD-base majors only — backtest pip model does not support crosses.
 pairs: [EURUSDm, GBPUSDm, AUDUSDm, NZDUSDm, USDJPYm, USDCADm, USDCHFm]
 
-# Active strategy module: trend_pullback | breakout_trend | h4_trend | h4_pullback
 strategy: h4_pullback
 
-# --- Sizing (Exness Standard Cent) ---
-# $4000 deposit = balance 400000 (each unit is $0.01).
-# 1% risk baseline: PF 1.08, +$580 / 2y.  3.5% + 3R: PF 0.96, -$1080 (broke WR).
-# Sweet spot: fix edge first at 2R, then 2.5% risk for ~$1.5k+ target swings.
+# --- Sizing ---
+# Runners @ 2.5%: 61.7% WR, PF 1.00, +$1.62 — WR great but avg loss ($102) > avg win ($63).
+# Scale: wider trail + tighter SL + min profit lock + 3% risk.
 
-risk_per_trade: 0.025 # 2.5% — thousand-$ months without 3.5% blow-up
+risk_per_trade: 0.03 # 3% — scale now WR>60% and PF~1.0
 max_open_trades: 7
 max_per_symbol: 1
 max_same_currency_bets: 4
-daily_loss_limit: 0.07
-max_drawdown_kill: 0.22
+daily_loss_limit: 0.08
+max_drawdown_kill: 0.28
 cooldown_after_loss_min: 10
 
 session_utc: ["00:00", "23:59"]
@@ -32,7 +28,6 @@ max_spread_pips:
   USDCADm: 2.5
   USDCHFm: 2.5
 
-# Shared indicator periods
 trend_ema: 50
 pullback_ema: 20
 rsi_period: 14
@@ -41,43 +36,39 @@ atr_sl_mult: 1.2
 tp_r_multiple: 1.5
 spread_buffer_pips: 1.0
 
-# trend_pullback-only
 pullback_lookback: 20
 pullback_expiry: 6
 swing_lookback: 10
 h1_slope_lookback: 5
 
-# breakout_trend-only
 breakout_lookback: 20
 min_trend_atr_frac: 0.15
 require_impulse_candle: true
 breakout_rsi_long_max: 70.0
 breakout_rsi_short_min: 30.0
 
-# Shared H4 params (h4_trend + h4_pullback)
 h4_trend_ema: 50
 h4_slope_lookback: 3
 h4_atr_period: 14
-h4_trail_atr_mult: 2.5 # chandelier distance once runner trail is active
-h4_trail_start_atr: 1.0 # trail/BE only after 1N in favor (losers untouched)
-h4_breakeven_after_atr: 1.0 # legacy alias; trail_start_atr drives runner mode
-h4_min_slope_atr_frac: 0.06 # skip weak H4 trends
+h4_trail_atr_mult: 3.0 # wider — let winners run (avg winner MFE 114 pips)
+h4_trail_start_atr: 0.85 # activate trail slightly earlier
+h4_trail_min_lock_atr: 0.75 # never trail-exit below 0.75N locked profit
+h4_breakeven_after_atr: 1.0
+h4_min_slope_atr_frac: 0.06
 h4_min_atr_percentile: 0
 h4_atr_percentile_lookback: 126
 
-# h4_trend-only (switch strategy: h4_trend to use these)
 h4_breakout_lookback: 20
-h4_atr_sl_mult: 1.25 # h4_pullback stop floor (h4_trend uses 2.0 if switched)
+h4_atr_sl_mult: 1.15 # tighter — cut loser MAE (was 83 pips avg)
 h4_tp_r_cap: 8.0
 
-# h4_pullback — dip/rally in trend; runner mode = far TP + trail on winners
 h4_pullback_ema: 20
 h4_pullback_lookback: 12
 h4_pullback_expiry: 4
 h4_pullback_extension_atr: 1.0
-h4_pullback_runners: true # true: 8R cap + trail exit | false: fixed 2R TP
-h4_pullback_tp_cap: 8.0 # disaster cap; trail is the real exit
-h4_pullback_tp_r: 2.0 # used only when h4_pullback_runners: false
+h4_pullback_runners: true
+h4_pullback_tp_cap: 8.0
+h4_pullback_tp_r: 2.0
 h4_pullback_max_age: 2
 h4_swing_lookback: 8
 
