@@ -43,6 +43,11 @@ def pull(symbols: list[str], days: int, db_path: str) -> None:
                 df = client.copy_rates_range(symbol, timeframe, date_from, date_to)
                 n = store.upsert_candles(symbol, timeframe, df)
                 logger.info("Stored %d %s %s candles", n, symbol, timeframe)
+                if n == 0:
+                    raise RuntimeError(
+                        f"Stored 0 candles for {symbol} {timeframe} — "
+                        "check symbol name in Market Watch and that history is available."
+                    )
 
                 gaps = store.find_gaps(symbol, timeframe, EXPECTED_INTERVAL_MINUTES[timeframe])
                 if gaps:

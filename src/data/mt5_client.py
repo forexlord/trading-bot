@@ -11,7 +11,6 @@ from datetime import datetime
 from typing import Any, Optional
 
 import pandas as pd
-import rpyc.utils.classic
 from mt5linux import MetaTrader5
 
 logger = logging.getLogger(__name__)
@@ -95,7 +94,26 @@ class MT5Client:
         info = self.symbol_info(symbol)
         return info["trade_tick_value"] * (pip_size / info["trade_tick_size"])
 
+    def ensure_symbol(self, symbol: str) -> str:
+        """Select symbol in Market Watch; try common Exness suffixes if needed."""
+        candidates = [symbol]
+        if not symbol[-1:].isdigit() and "." not in symbol:
+            candidates.extend(
+                [f"{symbol}m", f"{symbol}c", f"{symbol}.a", f"{symbol}.m", f"{symbol}_i"]
+            )
+        for name in candidates:
+            if self.raw.symbol_select(name, True):
+                if name != symbol:
+                    logger.info("Using broker symbol %s (configured as %s)", name, symbol)
+                return name
+        raise MT5ConnectionError(
+            f"symbol_select({symbol}) failed: {self.raw.last_error()}. "
+            "Open the symbol in Market Watch (right-click → Show All) or set the "
+            "exact broker name in config/settings.yaml pairs."
+        )
+
     def copy_rates(self, symbol: str, timeframe: str, count: int) -> pd.DataFrame:
+        symbol = self.ensure_symbol(symbol)
         tf = _resolve_timeframe(self.raw, timeframe)
         rates = self.raw.copy_rates_from_pos(symbol, tf, 0, count)
         return _rates_to_df(rates)
@@ -103,24 +121,37 @@ class MT5Client:
     def copy_rates_range(self, symbol: str, timeframe: str, date_from: datetime, date_to: datetime) -> pd.DataFrame:
         """Fetch bars in [date_from, date_to].
 
-        mt5linux 0.1.9 builds invalid remote ``eval()`` source for tz-aware
-        datetimes (the second arg becomes a bare ``2026-07-04 10:26:...``
-        literal and raises SyntaxError). Call the remote MT5 API with unix
-        timestamps instead.
+        Avoids mt5linux's broken ``copy_rates_range`` datetime serialization by
+        pulling recent bars with ``copy_rates_from_pos`` (ints only) and filtering.
         """
+        symbol = self.ensure_symbol(symbol)
         tf = _resolve_timeframe(self.raw, timeframe)
-        from_ts = int(date_from.timestamp())
-        to_ts = int(date_to.timestamp())
-        # RPyC eval() only accepts expressions (no import statements). Use
-        # utcfromtimestamp so we stay in a single expression.
-        conn = getattr(self.raw, "_MetaTrader5__conn")
-        code = (
-            f"mt5.copy_rates_range({symbol!r}, {int(tf)}, "
-            f"__import__('datetime').datetime.utcfromtimestamp({from_ts}), "
-            f"__import__('datetime').datetime.utcfromtimestamp({to_ts}))"
-        )
-        rates = rpyc.utils.classic.obtain(conn.eval(code))
-        return _rates_to_df(rates)
+        minutes = {"M15": 15, "H1": 60}[timeframe]
+        span_sec = max((date_to - date_from).total_seconds(), 0.0)
+        # Extra headroom for weekends/holidays.
+        count = int(span_sec / (minutes * 60) * 1.5) + 500
+        count = min(max(count, 100), 99_999)
+
+        rates = self.raw.copy_rates_from_pos(symbol, tf, 0, count)
+        df = _rates_to_df(rates)
+        if df.empty:
+            raise MT5ConnectionError(
+                f"No rates for {symbol} {timeframe}: {self.raw.last_error()}. "
+                "Open a chart for the symbol in MT5 once so history can download."
+            )
+
+        start = pd.Timestamp(date_from)
+        end = pd.Timestamp(date_to)
+        start = start.tz_localize("UTC") if start.tzinfo is None else start.tz_convert("UTC")
+        end = end.tz_localize("UTC") if end.tzinfo is None else end.tz_convert("UTC")
+        filtered = df[(df["time"] >= start) & (df["time"] <= end)].reset_index(drop=True)
+        if filtered.empty:
+            raise MT5ConnectionError(
+                f"No {symbol} {timeframe} bars inside {start} .. {end} "
+                f"(terminal returned {len(df)} bars from "
+                f"{df['time'].iloc[0]} to {df['time'].iloc[-1]})."
+            )
+        return filtered
 
     def open_positions(self) -> list[dict]:
         positions = self.raw.positions_get()
