@@ -18,7 +18,10 @@ class JsonlLogger:
         self._dir = Path(log_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
         self._prefix = prefix
-        self._handles: dict[Path, Any] = {}
+        # Only one file open at a time (backtest is chronological by day).
+        # Caching every day for 2y history blows past ulimit (Errno 24).
+        self._path: Path | None = None
+        self._fh: Any = None
         self._purge_old()
 
     def _path_for(self, ts: datetime) -> Path:
@@ -27,19 +30,18 @@ class JsonlLogger:
     def write(self, record: dict[str, Any], ts: datetime | None = None) -> None:
         ts = ts or datetime.now(timezone.utc)
         path = self._path_for(ts)
-        fh = self._handles.get(path)
-        if fh is None:
-            fh = open(path, "a", encoding="utf-8")
-            self._handles[path] = fh
-        fh.write(json.dumps(record, default=str) + "\n")
-        # Flush so readers/tests see lines without waiting for close(); still
-        # far cheaper than open/close per record.
-        fh.flush()
+        if self._fh is None or path != self._path:
+            if self._fh is not None:
+                self._fh.close()
+            self._path = path
+            self._fh = open(path, "a", encoding="utf-8")
+        self._fh.write(json.dumps(record, default=str) + "\n")
 
     def close(self) -> None:
-        for fh in self._handles.values():
-            fh.close()
-        self._handles.clear()
+        if self._fh is not None:
+            self._fh.close()
+            self._fh = None
+            self._path = None
 
     def __del__(self) -> None:
         try:
