@@ -111,12 +111,13 @@ class MT5Client:
         tf = _resolve_timeframe(self.raw, timeframe)
         from_ts = int(date_from.timestamp())
         to_ts = int(date_to.timestamp())
+        # RPyC eval() only accepts expressions (no import statements). Use
+        # utcfromtimestamp so we stay in a single expression.
         conn = getattr(self.raw, "_MetaTrader5__conn")
         code = (
-            "import datetime as _dt; "
             f"mt5.copy_rates_range({symbol!r}, {int(tf)}, "
-            f"_dt.datetime.fromtimestamp({from_ts}, _dt.timezone.utc), "
-            f"_dt.datetime.fromtimestamp({to_ts}, _dt.timezone.utc))"
+            f"__import__('datetime').datetime.utcfromtimestamp({from_ts}), "
+            f"__import__('datetime').datetime.utcfromtimestamp({to_ts}))"
         )
         rates = rpyc.utils.classic.obtain(conn.eval(code))
         return _rates_to_df(rates)
