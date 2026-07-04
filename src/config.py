@@ -17,7 +17,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SETTINGS_YAML_PATH = REPO_ROOT / "config" / "settings.yaml"
 
-load_dotenv(REPO_ROOT / ".env")
+# override=True so .env wins over a stale shell export of KILL_SWITCH_ENABLED.
+load_dotenv(REPO_ROOT / ".env", override=True)
+
 
 
 def _env_bool(name: str) -> bool | None:

@@ -112,6 +112,19 @@ def main() -> None:
         return
 
     settings = load_settings()
+    logger.info(
+        "kill_switch_enabled=%s (set KILL_SWITCH_ENABLED=false in .env to disable for research)",
+        settings.kill_switch_enabled,
+    )
+
+    # Fresh decision/trade/equity logs each run so reject counts are not polluted
+    # by previous backtests that appended to the same dated JSONL files.
+    log_dir = Path(args.log_dir)
+    if log_dir.exists():
+        for pattern in ("decisions-*.jsonl", "trades-*.jsonl", "equity-*.jsonl"):
+            for path in log_dir.glob(pattern):
+                path.unlink()
+
     store = Store(args.db)
 
     data: dict[str, _SymbolData] = {}
