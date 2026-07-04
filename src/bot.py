@@ -41,6 +41,8 @@ class Bot:
         self.settings: Settings = load_settings()
         self.secrets = load_secrets()
         self.strat = load_strategy(getattr(self.settings, "strategy", "trend_pullback"))
+        # Higher timeframe the strategy consumes (H1 default; h4_trend uses H4).
+        self.htf: str = getattr(self.strat, "HTF", "H1")
         self.logger = console_logger("bot")
         self.paper = paper
         self.logger.info("Strategy: %s", getattr(self.settings, "strategy", "trend_pullback"))
@@ -206,12 +208,12 @@ class Bot:
         update_fn = getattr(self.strat, "update_stop", None)
         if update_fn is None:
             return
-        h1 = self._closed_rates(symbol, "H1")
+        htf = self._closed_rates(symbol, self.htf)
         m15 = self._closed_rates(symbol, "M15")
-        if h1.empty or m15.empty:
+        if htf.empty or m15.empty:
             return
         proposal = update_fn(
-            symbol, trade.side, trade.entry, trade.entry_time, trade.sl, h1, m15, self.settings
+            symbol, trade.side, trade.entry, trade.entry_time, trade.sl, htf, m15, self.settings
         )
         if proposal is None:
             return
@@ -298,18 +300,18 @@ class Bot:
         return df.iloc[:-1] if len(df) else df
 
     def _evaluate_symbol(self, symbol: str, now: datetime, equity: float, balance: float) -> None:
-        h1 = self._closed_rates(symbol, "H1")
+        htf = self._closed_rates(symbol, self.htf)
         m15 = self._closed_rates(symbol, "M15")
-        self.store.upsert_candles(symbol, "H1", h1)
+        self.store.upsert_candles(symbol, self.htf, htf)
         self.store.upsert_candles(symbol, "M15", m15)
 
-        if h1.empty or len(m15) < 2:
+        if htf.empty or len(m15) < 2:
             return
 
-        ctx = self.strat.compute_context(symbol, h1, m15, self.settings)
+        ctx = self.strat.compute_context(symbol, htf, m15, self.settings)
         signal = None
         if symbol not in self.state.open_trades:
-            signal = self.strat.evaluate(symbol, h1, m15, self.settings)
+            signal = self.strat.evaluate(symbol, htf, m15, self.settings)
 
         pip = self.strat.pip_size(symbol)
         spread_pips = self.client.spread_pips(symbol, pip)

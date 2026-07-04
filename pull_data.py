@@ -15,8 +15,8 @@ from src.data.store import Store
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("pull_data")
 
-TIMEFRAMES = ("M15", "H1")
-EXPECTED_INTERVAL_MINUTES = {"M15": 15, "H1": 60}
+TIMEFRAMES = ("M15", "H1", "H4")
+EXPECTED_INTERVAL_MINUTES = {"M15": 15, "H1": 60, "H4": 240}
 DEFAULT_HISTORY_DAYS = 730
 
 

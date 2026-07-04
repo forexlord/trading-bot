@@ -16,12 +16,12 @@ from mt5linux import MetaTrader5
 
 logger = logging.getLogger(__name__)
 
-TIMEFRAMES = ("M15", "H1")
+TIMEFRAMES = ("M15", "H1", "H4")
 
 # Local MT5 timeframe constants (avoid RPyC netrefs in remote eval strings).
 # https://www.mql5.com/en/docs/constants/chartconstants/enum_timeframes
-_TF_CONST = {"M15": 15, "H1": 16385}
-_TF_MINUTES = {"M15": 15, "H1": 60}
+_TF_CONST = {"M15": 15, "H1": 16385, "H4": 16388}
+_TF_MINUTES = {"M15": 15, "H1": 60, "H4": 240}
 _CHUNK = 3000
 
 

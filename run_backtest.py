@@ -127,14 +127,35 @@ def main() -> None:
 
     store = Store(args.db)
 
+    from src.strategy import load_strategy
+
+    htf = getattr(load_strategy(settings.strategy), "HTF", "H1")
+    logger.info("Higher timeframe for %s: %s", settings.strategy, htf)
+
     data: dict[str, _SymbolData] = {}
     for symbol in settings.pairs:
-        h1 = store.read_candles(symbol, "H1", start=args.start, end=args.end)
+        higher = store.read_candles(symbol, htf, start=args.start, end=args.end)
+        if higher.empty and htf == "H4":
+            # Store pre-dates native H4 history: build it from the FULL H1
+            # history once (never range-restricted, so the cache is complete),
+            # persist it, then filter to the requested range.
+            # (pull_data.py now fetches H4 from the broker as well.)
+            from src.strategy.h4_trend import resample_h4
+
+            h1_full = store.read_candles(symbol, "H1")
+            if not h1_full.empty:
+                h4_full = resample_h4(h1_full)
+                store.upsert_candles(symbol, "H4", h4_full)
+                logger.info("Resampled %d H1 bars -> %d H4 bars for %s (cached in db)",
+                            len(h1_full), len(h4_full), symbol)
+                higher = store.read_candles(symbol, "H4", start=args.start, end=args.end)
         m15 = store.read_candles(symbol, "M15", start=args.start, end=args.end)
-        if h1.empty or m15.empty:
+        if higher.empty or m15.empty:
             store.close()
-            raise SystemExit(f"No candles found for {symbol} in range — run pull_data.py first.")
-        data[symbol] = _SymbolData(h1=h1, m15=m15)
+            raise SystemExit(
+                f"No {htf}/M15 candles found for {symbol} in range — run pull_data.py first."
+            )
+        data[symbol] = _SymbolData(h1=higher, m15=m15)
     store.close()
 
     start_equity = args.equity if args.equity is not None else settings.backtest_start_equity

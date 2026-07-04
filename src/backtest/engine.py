@@ -70,7 +70,7 @@ class OpenPosition:
 
 @dataclass
 class _SymbolData:
-    h1: pd.DataFrame
+    h1: pd.DataFrame  # higher-timeframe bars: H1 or H4, per the strategy's HTF
     m15: pd.DataFrame
 
 
@@ -99,6 +99,10 @@ class BacktestEngine:
         self._trade_seq = 0
 
         self.strat = load_strategy(getattr(params, "strategy", "trend_pullback"))
+        # Higher timeframe the strategy consumes (H1 default; h4_trend uses H4).
+        # _SymbolData.h1 carries bars of THIS timeframe — callers must load it.
+        self.htf: str = getattr(self.strat, "HTF", "H1")
+        self._htf_delta = pd.Timedelta(minutes={"H1": 60, "H4": 240}[self.htf])
         self.decision_log = DecisionLogger(log_dir)
         self.trade_log = TradeLogger(log_dir)
         self.equity_log = EquityLogger(log_dir)
@@ -259,14 +263,16 @@ class BacktestEngine:
     def _slices(self, symbol: str, idx: int, ts: pd.Timestamp) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Data visible at the close of the M15 bar stamped ts ("now" = ts+15min).
 
-        Lookahead guard: an H1 bar stamped H closes at H+1h, so it is only
-        visible when H+1h <= ts+15min, i.e. H <= ts-45min. Including bars up
-        to ts (the old behavior) leaked up to 45 minutes of the H1 close into
-        the strategy — live could never see that.
+        Lookahead guard: a higher-timeframe bar stamped T (duration D) closes
+        at T+D, so it is only visible when T+D <= ts+15min, i.e.
+        T <= ts+15min-D (H1: ts-45min; H4: ts-3h45min). Including bars up to
+        ts (the old behavior) leaked part of the HTF close into the strategy —
+        live could never see that.
         """
         sd = self.data[symbol]
         h1_times = self._h1_times[symbol]
-        h1_end = int(np.searchsorted(h1_times, ts - pd.Timedelta(minutes=45), side="right"))
+        cutoff = ts + pd.Timedelta(minutes=15) - self._htf_delta
+        h1_end = int(np.searchsorted(h1_times, cutoff, side="right"))
         h1_start = max(0, h1_end - WARMUP_H1_BARS)
         h1_slice = sd.h1.iloc[h1_start:h1_end]
         m15_slice = sd.m15.iloc[max(0, idx - WARMUP_M15_BARS + 1) : idx + 1]

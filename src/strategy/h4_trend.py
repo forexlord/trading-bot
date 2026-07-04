@@ -11,7 +11,9 @@ Why this design (see README research notes / backtest diagnostics):
   (the M15 runs capped winners at 1.5R while MFE tails reached 110 pips).
 
 Rules (Turtle-adapted):
-- H4 candles are resampled from H1 inside the strategy (pure function).
+- H4 candles are fetched/stored natively (HTF = "H4"); callers pass CLOSED H4
+  bars in the higher-timeframe slot. resample_h4() exists only as a one-time
+  fallback for stores that pre-date native H4 history.
 - Regime: H4 close vs EMA(h4_trend_ema) + EMA slope over h4_slope_lookback bars.
 - Entry: H4 close breaks the prior h4_breakout_lookback-bar Donchian channel,
   in the regime direction, evaluated ONLY on the M15 close that completes an
@@ -35,7 +37,11 @@ import pandas as pd
 from src.indicators.ta import atr_wilder, ema
 from src.strategy.common import Context, Signal, pip_size
 
-__all__ = ["Context", "Signal", "pip_size", "compute_context", "evaluate", "update_stop"]
+__all__ = ["Context", "Signal", "pip_size", "compute_context", "evaluate", "update_stop", "HTF"]
+
+# Higher timeframe this strategy consumes in the first dataframe argument.
+# The engine/bot/run_backtest read this and supply native H4 candles.
+HTF = "H4"
 
 H4 = pd.Timedelta(hours=4)
 H1 = pd.Timedelta(hours=1)
@@ -101,8 +107,8 @@ def _is_h4_decision_point(m15_df: pd.DataFrame, h4: pd.DataFrame) -> bool:
     return bool(m15_end == h4_end)
 
 
-def _analyze(symbol: str, h1_df: pd.DataFrame, m15_df: pd.DataFrame, params: Any):
-    h4 = resample_h4(h1_df)
+def _analyze(symbol: str, h4_df: pd.DataFrame, m15_df: pd.DataFrame, params: Any):
+    h4 = h4_df.reset_index(drop=True)  # native H4 bars, already closed-only
     regime, h4_close, h4_ema, slope = _regime(h4, params)
 
     atr_period = int(_f(params, "h4_atr_period", 14))
@@ -140,13 +146,13 @@ def _analyze(symbol: str, h1_df: pd.DataFrame, m15_df: pd.DataFrame, params: Any
     return ctx, h4, atr_now
 
 
-def compute_context(symbol: str, h1_df: pd.DataFrame, m15_df: pd.DataFrame, params: Any) -> Context:
-    ctx, *_ = _analyze(symbol, h1_df, m15_df, params)
+def compute_context(symbol: str, h4_df: pd.DataFrame, m15_df: pd.DataFrame, params: Any) -> Context:
+    ctx, *_ = _analyze(symbol, h4_df, m15_df, params)
     return ctx
 
 
-def evaluate(symbol: str, h1_df: pd.DataFrame, m15_df: pd.DataFrame, params: Any) -> Signal | None:
-    ctx, h4, atr_now = _analyze(symbol, h1_df, m15_df, params)
+def evaluate(symbol: str, h4_df: pd.DataFrame, m15_df: pd.DataFrame, params: Any) -> Signal | None:
+    ctx, h4, atr_now = _analyze(symbol, h4_df, m15_df, params)
 
     if ctx.regime == "NONE" or not ctx.pullback_active:
         return None
@@ -188,7 +194,7 @@ def update_stop(
     entry: float,
     entry_time: datetime | pd.Timestamp,
     current_sl: float,
-    h1_df: pd.DataFrame,
+    h4_df: pd.DataFrame,
     m15_df: pd.DataFrame,
     params: Any,
 ) -> float | None:
@@ -199,7 +205,7 @@ def update_stop(
     may not reach back to entry_time on long trades — that is fine, because
     the ratchet makes the effective trail the running max of proposals.
     """
-    h4 = resample_h4(h1_df)
+    h4 = h4_df.reset_index(drop=True)
     if h4.empty:
         return None
 

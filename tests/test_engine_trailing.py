@@ -148,3 +148,35 @@ def test_h1_slice_excludes_bars_not_yet_closed(tmp_path):
     )
     h1_slice_b, _ = engine2._slices("EURUSD", 0, m15_b["time"].iloc[0])
     assert h1_slice_b["time"].max() == pd.Timestamp("2024-01-02 10:00", tz="UTC")
+
+
+def test_h4_slice_excludes_bars_not_yet_closed(tmp_path):
+    # With strategy=h4_trend the higher-timeframe slot carries H4 bars.
+    # The 08:00 H4 bar closes at 12:00: invisible at the 11:30 M15 close,
+    # visible at the 11:45 M15 close (which lands exactly on 12:00).
+    h4 = pd.DataFrame(
+        {
+            "time": pd.date_range("2024-01-02 00:00", periods=3, freq="4h", tz="UTC"),  # 00,04,08
+            "open": 1.10, "high": 1.11, "low": 1.09, "close": 1.10,
+        }
+    )
+    m15_early = _m15([("2024-01-02 11:15", 1.1000, 1.1010, 1.0990, 1.1005)])  # closes 11:30
+    engine = BacktestEngine(
+        data={"EURUSD": _SymbolData(h1=h4, m15=m15_early)},
+        params=_params(strategy="h4_trend"),
+        log_dir=str(tmp_path),
+        start_equity=400000.0,
+    )
+    assert engine.htf == "H4"
+    slice_early, _ = engine._slices("EURUSD", 0, m15_early["time"].iloc[0])
+    assert slice_early["time"].max() == pd.Timestamp("2024-01-02 04:00", tz="UTC")
+
+    m15_late = _m15([("2024-01-02 11:45", 1.1000, 1.1010, 1.0990, 1.1005)])  # closes 12:00
+    engine2 = BacktestEngine(
+        data={"EURUSD": _SymbolData(h1=h4, m15=m15_late)},
+        params=_params(strategy="h4_trend"),
+        log_dir=str(tmp_path / "b"),
+        start_equity=400000.0,
+    )
+    slice_late, _ = engine2._slices("EURUSD", 0, m15_late["time"].iloc[0])
+    assert slice_late["time"].max() == pd.Timestamp("2024-01-02 08:00", tz="UTC")
