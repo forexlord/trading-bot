@@ -2,7 +2,7 @@ import pytest
 
 from src.execution.paper import PaperBroker
 from src.risk.risk_manager import Approved
-from src.strategy.trend_pullback import Signal
+from src.strategy.common import Signal
 
 
 class FakeClient:

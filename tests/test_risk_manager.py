@@ -13,7 +13,7 @@ from src.risk.risk_manager import (
     SymbolInfo,
     evaluate,
 )
-from src.strategy.trend_pullback import Signal
+from src.strategy.common import Signal
 
 PARAMS = SimpleNamespace(
     risk_per_trade=0.01,

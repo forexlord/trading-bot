@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(frozen=True)
 
     pairs: list[str]
+    strategy: str = "trend_pullback"
 
     risk_per_trade: float
     max_open_trades: int
@@ -61,6 +62,13 @@ class Settings(BaseSettings):
     pullback_expiry: int
     swing_lookback: int
     h1_slope_lookback: int
+
+    # breakout_trend
+    breakout_lookback: int = 20
+    min_trend_atr_frac: float = 0.15
+    require_impulse_candle: bool = True
+    breakout_rsi_long_max: float = 70.0
+    breakout_rsi_short_min: float = 30.0
 
     backtest_start_equity: float
 

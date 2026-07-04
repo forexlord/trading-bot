@@ -19,7 +19,7 @@ from datetime import datetime, time
 from decimal import Decimal, ROUND_FLOOR
 from typing import Any
 
-from src.strategy.trend_pullback import Signal
+from src.strategy.common import Signal
 
 
 @dataclass

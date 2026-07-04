@@ -8,7 +8,7 @@ from __future__ import annotations
 from src.data.mt5_client import MT5Client
 from src.execution.types import FillResult
 from src.risk.risk_manager import Approved
-from src.strategy.trend_pullback import Signal, pip_size
+from src.strategy.common import Signal, pip_size
 
 SLIPPAGE_PIPS = 0.5
 

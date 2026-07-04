@@ -19,7 +19,8 @@ from src.execution.paper import PaperBroker
 from src.logger import DecisionLogger, EquityLogger, TradeLogger, console_logger
 from src.risk import risk_manager as rm
 from src.state import BotState, StateStore, TradeState
-from src.strategy import trend_pullback as strat
+from src.strategy import load_strategy
+from src.strategy.common import Signal
 from src.telegram import TelegramAlerts
 
 HISTORY_BARS = 300
@@ -37,8 +38,10 @@ class Bot:
     def __init__(self, paper: bool, db_path: str = "forex_bot.db", state_path: str = "state/state.json", log_dir: str = "logs"):
         self.settings: Settings = load_settings()
         self.secrets = load_secrets()
+        self.strat = load_strategy(getattr(self.settings, "strategy", "trend_pullback"))
         self.logger = console_logger("bot")
         self.paper = paper
+        self.logger.info("Strategy: %s", getattr(self.settings, "strategy", "trend_pullback"))
 
         self.client = MT5Client(
             host=self.secrets.mt5_host,
@@ -174,7 +177,7 @@ class Bot:
     def _update_excursion(self, symbol: str, trade: TradeState) -> None:
         tick = self.client.symbol_info_tick(symbol)
         price = tick["bid"] if trade.side == "LONG" else tick["ask"]
-        pip = strat.pip_size(symbol)
+        pip = self.strat.pip_size(symbol)
         if trade.side == "LONG":
             trade.mae_pips = max(trade.mae_pips, (trade.entry - price) / pip)
             trade.mfe_pips = max(trade.mfe_pips, (price - trade.entry) / pip)
@@ -183,7 +186,7 @@ class Bot:
             trade.mfe_pips = max(trade.mfe_pips, (trade.entry - price) / pip)
 
     def _finalize_closed_trade(self, symbol: str, trade: TradeState, now: datetime) -> None:
-        pip = strat.pip_size(symbol)
+        pip = self.strat.pip_size(symbol)
         tick = self.client.symbol_info_tick(symbol)
         last_price = tick["bid"] if trade.side == "LONG" else tick["ask"]
         outcome = "TP" if abs(last_price - trade.tp) < abs(last_price - trade.sl) else "SL"
@@ -232,12 +235,12 @@ class Bot:
         if h1.empty or len(m15) < 2:
             return
 
-        ctx = strat.compute_context(symbol, h1, m15, self.settings)
+        ctx = self.strat.compute_context(symbol, h1, m15, self.settings)
         signal = None
         if symbol not in self.state.open_trades:
-            signal = strat.evaluate(symbol, h1, m15, self.settings)
+            signal = self.strat.evaluate(symbol, h1, m15, self.settings)
 
-        pip = strat.pip_size(symbol)
+        pip = self.strat.pip_size(symbol)
         spread_pips = self.client.spread_pips(symbol, pip)
 
         verdict = None
@@ -283,7 +286,7 @@ class Bot:
         self, symbol: str, now: datetime, equity: float, balance: float, spread_pips: float
     ) -> rm.AccountState:
         symbol_info_raw = self.client.symbol_info(symbol)
-        pip = strat.pip_size(symbol)
+        pip = self.strat.pip_size(symbol)
         symbol_info = rm.SymbolInfo(
             pip_value_per_lot=self.client.pip_value_per_lot(symbol, pip),
             volume_step=symbol_info_raw["volume_step"],
@@ -303,7 +306,7 @@ class Bot:
             last_entry_time_by_symbol=self.state.to_risk_last_entry_time_by_symbol(),
         )
 
-    def _open_trade(self, signal: strat.Signal, verdict: rm.Approved, now: datetime) -> None:
+    def _open_trade(self, signal: Signal, verdict: rm.Approved, now: datetime) -> None:
         fill = self.broker.open_position(signal, verdict)
         if not fill.success:
             self.logger.error("Order failed for %s %s: %s", signal.symbol, signal.side, fill.comment)

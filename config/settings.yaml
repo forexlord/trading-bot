@@ -1,9 +1,11 @@
-# Forex bot v1 configuration.
-# NOTE: there is intentionally no runtime switch to disable the kill switch here.
-# Re-enabling trading after a kill-switch trip requires a manual edit + restart.
+# Forex bot configuration.
+# Kill switch: default on. Override with KILL_SWITCH_ENABLED=false in .env for research only.
 
 # Exness Standard Cent uses the "m" suffix (EURUSDm / GBPUSDm).
 pairs: [EURUSDm, GBPUSDm]
+
+# Active strategy module: trend_pullback | breakout_trend
+strategy: breakout_trend
 
 risk_per_trade: 0.01 # fraction of balance risked per trade
 max_open_trades: 2 # total concurrent open trades across all pairs
@@ -18,22 +20,29 @@ max_spread_pips:
   EURUSDm: 1.5
   GBPUSDm: 2.0
 
+# Shared indicator periods (slow/fast EMAs used by both strategies)
 trend_ema: 50
 pullback_ema: 20
 rsi_period: 14
 atr_period: 14
-atr_sl_mult: 1.5
-tp_r_multiple: 2.0
+atr_sl_mult: 1.2 # slightly tighter than v1 pullback (was 1.5)
+tp_r_multiple: 1.5 # 1.5R — easier target than 2R given historical WR ~34%
 spread_buffer_pips: 1.0
 
-pullback_lookback: 20 # M15 candles to look back for a pullback trigger
-pullback_expiry: 6 # M15 candles after which an active pullback state expires
-swing_lookback: 10 # M15 candles used for swing high/low SL calc
-h1_slope_lookback: 5 # H1 bars back used to confirm EMA50 slope direction
+# trend_pullback-only
+pullback_lookback: 20
+pullback_expiry: 6
+swing_lookback: 10
+h1_slope_lookback: 5
+
+# breakout_trend-only
+breakout_lookback: 20 # Donchian channel length on M15
+min_trend_atr_frac: 0.15 # |EMA20-EMA50| must be >= this * H1 ATR
+require_impulse_candle: true
+breakout_rsi_long_max: 70.0
+breakout_rsi_short_min: 30.0
 
 backtest_start_equity: 400000 # account units ($4000 on Exness Standard Cent: 1 unit = $0.01)
 
 # Default on. Override from .env with KILL_SWITCH_ENABLED=false for research backtests only.
-# Never leave this false for live trading.
 kill_switch_enabled: true
-

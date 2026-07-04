@@ -1,4 +1,4 @@
-"""Trend-following pullback strategy.
+"""Trend-following pullback strategy (v1).
 
 Pure function of data: (symbol, h1_df, m15_df, params) -> Signal | None.
 No MT5 imports here — this exact code path is shared by the backtester and
@@ -7,47 +7,16 @@ callers must never pass a dataframe containing an in-progress candle.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
 from src.indicators.ta import atr_wilder, ema, rsi_wilder, swing_high, swing_low
+from src.strategy.common import Context, Signal, pip_size
 
-JPY_PIP_SIZE = 0.01
-DEFAULT_PIP_SIZE = 0.0001
+__all__ = ["Context", "Signal", "pip_size", "compute_context", "evaluate"]
 
-
-def pip_size(symbol: str) -> float:
-    return JPY_PIP_SIZE if symbol.upper().endswith("JPY") else DEFAULT_PIP_SIZE
-
-
-@dataclass
-class Context:
-    """Indicator/state snapshot for the just-closed M15 candle. Logged every bar."""
-
-    regime: str  # "LONG" | "SHORT" | "NONE"
-    h1_close: float
-    h1_ema50: float
-    ema50_slope: float
-    m15_close: float
-    m15_ema20: float
-    rsi: float
-    atr_pips: float
-    pullback_active: bool
-    pullback_age: int | None
-
-
-@dataclass
-class Signal:
-    symbol: str
-    side: str  # "LONG" | "SHORT"
-    entry: float
-    sl: float
-    tp: float
-    sl_pips: float
-    context: Context
 
 
 def _regime(h1_df: pd.DataFrame, params: Any) -> tuple[str, float, float, float]:

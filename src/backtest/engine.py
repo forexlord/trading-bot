@@ -18,7 +18,8 @@ import pandas as pd
 
 from src.logger import DecisionLogger, EquityLogger, TradeLogger
 from src.risk import risk_manager as rm
-from src.strategy import trend_pullback as strat
+from src.strategy import load_strategy
+from src.strategy.common import Context, Signal, pip_size
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +37,7 @@ def assumed_pip_value_per_lot(symbol: str) -> float:
     path (mt5_client.pip_value_per_lot) must never use this — it reads the
     broker's real tick value/size instead.
     """
-    pip = strat.pip_size(symbol)
-    return pip * CONTRACT_SIZE * CENTS_PER_UNIT
+    return pip_size(symbol) * CONTRACT_SIZE * CENTS_PER_UNIT
 
 
 @dataclass
@@ -57,7 +57,7 @@ class OpenPosition:
     mfe_pips: float = 0.0
 
     def update_excursion(self, high: float, low: float) -> None:
-        pip = strat.pip_size(self.symbol)
+        pip = pip_size(self.symbol)
         if self.side == "LONG":
             adverse = (self.entry - low) / pip
             favorable = (high - self.entry) / pip
@@ -98,10 +98,12 @@ class BacktestEngine:
         self.equity_history: list[dict] = []
         self._trade_seq = 0
 
+        self.strat = load_strategy(getattr(params, "strategy", "trend_pullback"))
         self.decision_log = DecisionLogger(log_dir)
         self.trade_log = TradeLogger(log_dir)
         self.equity_log = EquityLogger(log_dir)
         self._last_equity_log_hour: Any = None
+        logger.info("Strategy: %s", getattr(params, "strategy", "trend_pullback"))
 
         # Pre-index bars so the main loop is O(1) per symbol per timestamp
         # instead of scanning full DataFrames every bar.
@@ -180,7 +182,7 @@ class BacktestEngine:
     def _close_position(
         self, position: OpenPosition, ts: pd.Timestamp, exit_price: float, outcome: str
     ) -> None:
-        pip = strat.pip_size(position.symbol)
+        pip = pip_size(position.symbol)
         pip_value = assumed_pip_value_per_lot(position.symbol)
         price_diff = (exit_price - position.entry) if position.side == "LONG" else (position.entry - exit_price)
         pnl = (price_diff / pip) * pip_value * position.lots
@@ -236,13 +238,13 @@ class BacktestEngine:
         m15_slice = sd.m15.iloc[max(0, idx - WARMUP_M15_BARS + 1) : idx + 1]
 
         if h1_slice.empty or len(m15_slice) < 2:
-            self._log_eval(symbol, ts, strat.Context("NONE", float("nan"), float("nan"), float("nan"),
+            self._log_eval(symbol, ts, Context("NONE", float("nan"), float("nan"), float("nan"),
                                                        float("nan"), float("nan"), float("nan"), float("nan"),
                                                        False, None), None, None, None)
             return
 
-        ctx = strat.compute_context(symbol, h1_slice, m15_slice, self.params)
-        signal = strat.evaluate(symbol, h1_slice, m15_slice, self.params)
+        ctx = self.strat.compute_context(symbol, h1_slice, m15_slice, self.params)
+        signal = self.strat.evaluate(symbol, h1_slice, m15_slice, self.params)
 
         verdict = None
         reject_reason = None
@@ -313,8 +315,8 @@ class BacktestEngine:
             last_entry_time_by_symbol=self.last_entry_time_by_symbol,
         )
 
-    def _open_position(self, signal: strat.Signal, verdict: rm.Approved, ts: pd.Timestamp) -> None:
-        pip = strat.pip_size(signal.symbol)
+    def _open_position(self, signal: Signal, verdict: rm.Approved, ts: pd.Timestamp) -> None:
+        pip = pip_size(signal.symbol)
         slip = (self._assumed_spread_pips(signal.symbol) + SLIPPAGE_PIPS) * pip
         fill = signal.entry + slip if signal.side == "LONG" else signal.entry - slip
 

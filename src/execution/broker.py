@@ -8,13 +8,13 @@ import logging
 from src.data.mt5_client import MT5Client
 from src.execution.types import FillResult
 from src.risk.risk_manager import Approved
-from src.strategy.trend_pullback import Signal
+from src.strategy.common import Signal
 
 logger = logging.getLogger(__name__)
 
 DEVIATION_POINTS = 20
 MAGIC_NUMBER = 990001
-COMMENT = "trend_pullback_v1"
+COMMENT = "forex_bot"
 
 
 class LiveBroker:
