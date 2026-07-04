@@ -11,11 +11,18 @@ from datetime import datetime
 from typing import Any, Optional
 
 import pandas as pd
+import rpyc.utils.classic
 from mt5linux import MetaTrader5
 
 logger = logging.getLogger(__name__)
 
 TIMEFRAMES = ("M15", "H1")
+
+# Local MT5 timeframe constants (avoid RPyC netrefs in remote eval strings).
+# https://www.mql5.com/en/docs/constants/chartconstants/enum_timeframes
+_TF_CONST = {"M15": 15, "H1": 16385}
+_TF_MINUTES = {"M15": 15, "H1": 60}
+_CHUNK = 3000
 
 
 class MT5ConnectionError(RuntimeError):
@@ -59,6 +66,12 @@ class MT5Client:
             raise MT5ConnectionError("Not connected — call connect() first")
         return self._mt5
 
+    def _conn(self) -> Any:
+        return getattr(self.raw, "_MetaTrader5__conn")
+
+    def _eval(self, code: str) -> Any:
+        return rpyc.utils.classic.obtain(self._conn().eval(code))
+
     def account_info(self) -> dict:
         info = self.raw.account_info()
         if info is None:
@@ -72,12 +85,14 @@ class MT5Client:
         return info._asdict()
 
     def symbol_info(self, symbol: str) -> dict:
+        symbol = self.ensure_symbol(symbol)
         info = self.raw.symbol_info(symbol)
         if info is None:
             raise MT5ConnectionError(f"symbol_info({symbol}) failed: {self.raw.last_error()}")
         return info._asdict()
 
     def symbol_info_tick(self, symbol: str) -> dict:
+        symbol = self.ensure_symbol(symbol)
         tick = self.raw.symbol_info_tick(symbol)
         if tick is None:
             raise MT5ConnectionError(f"symbol_info_tick({symbol}) failed: {self.raw.last_error()}")
@@ -97,48 +112,72 @@ class MT5Client:
     def ensure_symbol(self, symbol: str) -> str:
         """Select symbol in Market Watch; try common Exness suffixes if needed."""
         candidates = [symbol]
-        if not symbol[-1:].isdigit() and "." not in symbol:
+        # Exness Standard Cent uses EURUSDm / GBPUSDm.
+        if symbol[-1:] not in "mci" and "." not in symbol and "_" not in symbol:
             candidates.extend(
                 [f"{symbol}m", f"{symbol}c", f"{symbol}.a", f"{symbol}.m", f"{symbol}_i"]
             )
         for name in candidates:
-            if self.raw.symbol_select(name, True):
+            ok = self._eval(f"mt5.symbol_select({name!r}, True)")
+            if ok:
                 if name != symbol:
                     logger.info("Using broker symbol %s (configured as %s)", name, symbol)
                 return name
         raise MT5ConnectionError(
             f"symbol_select({symbol}) failed: {self.raw.last_error()}. "
             "Open the symbol in Market Watch (right-click → Show All) or set the "
-            "exact broker name in config/settings.yaml pairs."
+            "exact broker name in config/settings.yaml pairs (e.g. EURUSDm)."
+        )
+
+    def _copy_from_pos(self, symbol: str, timeframe: str, start_pos: int, count: int) -> Any:
+        tf = _TF_CONST[timeframe]
+        return self._eval(
+            f"mt5.copy_rates_from_pos({symbol!r}, {tf}, {int(start_pos)}, {int(count)})"
         )
 
     def copy_rates(self, symbol: str, timeframe: str, count: int) -> pd.DataFrame:
         symbol = self.ensure_symbol(symbol)
-        tf = _resolve_timeframe(self.raw, timeframe)
-        rates = self.raw.copy_rates_from_pos(symbol, tf, 0, count)
+        rates = self._copy_from_pos(symbol, timeframe, 0, count)
         return _rates_to_df(rates)
 
     def copy_rates_range(self, symbol: str, timeframe: str, date_from: datetime, date_to: datetime) -> pd.DataFrame:
         """Fetch bars in [date_from, date_to].
 
-        Avoids mt5linux's broken ``copy_rates_range`` datetime serialization by
-        pulling recent bars with ``copy_rates_from_pos`` (ints only) and filtering.
+        mt5linux's datetime-based APIs break over RPyC eval. We pull history in
+        integer chunks via ``copy_rates_from_pos`` and filter to the range.
         """
-        symbol = self.ensure_symbol(symbol)
-        tf = _resolve_timeframe(self.raw, timeframe)
-        minutes = {"M15": 15, "H1": 60}[timeframe]
-        span_sec = max((date_to - date_from).total_seconds(), 0.0)
-        # Extra headroom for weekends/holidays.
-        count = int(span_sec / (minutes * 60) * 1.5) + 500
-        count = min(max(count, 100), 99_999)
+        if timeframe not in _TF_CONST:
+            raise ValueError(f"Unsupported timeframe: {timeframe}")
 
-        rates = self.raw.copy_rates_from_pos(symbol, tf, 0, count)
-        df = _rates_to_df(rates)
-        if df.empty:
+        symbol = self.ensure_symbol(symbol)
+        minutes = _TF_MINUTES[timeframe]
+        span_sec = max((date_to - date_from).total_seconds(), 0.0)
+        total = int(span_sec / (minutes * 60) * 1.5) + 500
+        total = min(max(total, 100), 99_999)
+
+        frames: list[pd.DataFrame] = []
+        pos = 0
+        while pos < total:
+            chunk = min(_CHUNK, total - pos)
+            rates = self._copy_from_pos(symbol, timeframe, pos, chunk)
+            part = _rates_to_df(rates)
+            if part.empty:
+                break
+            frames.append(part)
+            got = len(part)
+            pos += got
+            if got < chunk:
+                break
+
+        if not frames:
             raise MT5ConnectionError(
                 f"No rates for {symbol} {timeframe}: {self.raw.last_error()}. "
-                "Open a chart for the symbol in MT5 once so history can download."
+                "In MT5 VNC: open an M15 chart for this symbol and scroll left "
+                "so history downloads, then retry."
             )
+
+        df = pd.concat(frames, ignore_index=True).drop_duplicates(subset=["time"]).sort_values("time")
+        df = df.reset_index(drop=True)
 
         start = pd.Timestamp(date_from)
         end = pd.Timestamp(date_to)
@@ -164,13 +203,6 @@ class MT5Client:
         if result is None:
             raise MT5ConnectionError(f"order_send() failed: {self.raw.last_error()}")
         return result._asdict()
-
-
-def _resolve_timeframe(mt5: Any, timeframe: str) -> int:
-    mapping = {"M15": mt5.TIMEFRAME_M15, "H1": mt5.TIMEFRAME_H1}
-    if timeframe not in mapping:
-        raise ValueError(f"Unsupported timeframe: {timeframe}")
-    return mapping[timeframe]
 
 
 def _rates_to_df(rates: Any) -> pd.DataFrame:

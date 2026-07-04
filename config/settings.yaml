@@ -2,7 +2,8 @@
 # NOTE: there is intentionally no runtime switch to disable the kill switch here.
 # Re-enabling trading after a kill-switch trip requires a manual edit + restart.
 
-pairs: [EURUSD, GBPUSD]
+# Exness Standard Cent uses the "m" suffix (EURUSDm / GBPUSDm).
+pairs: [EURUSDm, GBPUSDm]
 
 risk_per_trade: 0.01 # fraction of balance risked per trade
 max_open_trades: 2 # total concurrent open trades across all pairs
@@ -14,8 +15,8 @@ cooldown_after_loss_min: 15 # minutes after a losing trade before a new entry on
 session_utc: ["07:00", "16:00"]
 
 max_spread_pips:
-  EURUSD: 1.5
-  GBPUSD: 2.0
+  EURUSDm: 1.5
+  GBPUSDm: 2.0
 
 trend_ema: 50
 pullback_ema: 20
