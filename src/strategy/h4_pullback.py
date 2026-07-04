@@ -13,13 +13,16 @@ Rules:
 - Entry: only on the M15 close that completes an H4 bar; bullish/bearish H4
   close + RSI(14) momentum confirm (same logic as trend_pullback on M15).
 - SL: min/max of swing low/high and ATR floor (tighter than breakout 2N).
-- TP: fixed h4_pullback_tp_r * R — take profit at a realistic target; no
-  wide 8R disaster cap + chandelier (that profile fit breakouts, not pullbacks).
+- TP: far h4_pullback_tp_cap * R disaster cap; the chandelier trail is the
+  real exit once price moves h4_trail_start_atr * ATR in favor (winners only).
+- Trail/breakeven never activates until the trade is in profit — losers keep
+  the original stop.
 
 Pure function of data: no MT5 imports.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 import numpy as np
@@ -36,6 +39,7 @@ __all__ = [
     "compute_context",
     "evaluate",
     "evaluate_with_context",
+    "update_stop",
     "HTF",
     "DECIDES_ON_HTF_CLOSE",
     "resample_h4",
@@ -201,6 +205,9 @@ def _signal_from(
 ) -> Signal | None:
     if ctx.regime == "NONE" or not ctx.pullback_active:
         return None
+    max_age = int(_f(params, "h4_pullback_max_age", 2))
+    if ctx.pullback_age is None or ctx.pullback_age > max_age:
+        return None
     if i < 2:
         return None
     if not _is_h4_decision_point(m15_df, h4):
@@ -217,11 +224,20 @@ def _signal_from(
     if atr_price <= 0:
         return None
 
+    # Skip weak trends — light filter; 0 disables.
+    min_slope = float(_f(params, "h4_min_slope_atr_frac", 0.0))
+    if min_slope > 0 and abs(ctx.ema50_slope) < min_slope * atr_price:
+        return None
+
     pip = pip_size(symbol)
     spread_buffer = float(_f(params, "spread_buffer_pips", 1.0)) * pip
     entry = float(m15_df["close"].iloc[-1])
     sl_mult = float(_f(params, "h4_atr_sl_mult", 1.3))
-    tp_r = float(_f(params, "h4_pullback_tp_r", 2.0))
+    use_runners = bool(_f(params, "h4_pullback_runners", True))
+    if use_runners:
+        tp_r = float(_f(params, "h4_pullback_tp_cap", 8.0))
+    else:
+        tp_r = float(_f(params, "h4_pullback_tp_r", 2.0))
     swing_lb = int(_f(params, "h4_swing_lookback", 8))
 
     if ctx.regime == "LONG":
@@ -270,3 +286,58 @@ def _signal_from(
         sl_pips=risk / pip,
         context=ctx,
     )
+
+
+def update_stop(
+    symbol: str,
+    side: str,
+    entry: float,
+    entry_time: datetime | pd.Timestamp,
+    current_sl: float,
+    h4_df: pd.DataFrame,
+    m15_df: pd.DataFrame,
+    params: Any,
+) -> float | None:
+    """Chandelier trail + breakeven, ONLY after the trade is in profit.
+
+    Losers keep the original stop untouched. Once price has moved
+    h4_trail_start_atr * ATR in favor, ratchet SL up (long) / down (short).
+    Exit is normally via the trailed stop; TP is a far cap only.
+    """
+    h4 = h4_df.reset_index(drop=True)
+    if h4.empty:
+        return None
+
+    atr_period = int(_f(params, "h4_atr_period", 14))
+    trail_mult = float(_f(params, "h4_trail_atr_mult", 2.5))
+    trail_start = float(_f(params, "h4_trail_start_atr", 1.0))
+    be_buffer = float(_f(params, "spread_buffer_pips", 1.0)) * pip_size(symbol)
+
+    atr_h4 = atr_wilder(h4, atr_period)
+    atr_now = float(atr_h4.iloc[-1]) if not np.isnan(atr_h4.iloc[-1]) else float("nan")
+    if np.isnan(atr_now) or atr_now <= 0:
+        return None
+
+    entry_ts = pd.Timestamp(entry_time)
+    if entry_ts.tzinfo is None:
+        entry_ts = entry_ts.tz_localize("UTC")
+    since = h4[h4["time"] >= entry_ts.floor("4h")]
+    if since.empty:
+        since = h4.tail(1)
+
+    min_move = trail_start * atr_now
+
+    if side == "LONG":
+        anchor = float(since["close"].max())
+        if anchor - entry < min_move:
+            return None  # not winning yet
+        proposal = anchor - trail_mult * atr_now
+        proposal = max(proposal, entry + be_buffer)
+        return proposal if proposal > current_sl else None
+
+    anchor = float(since["close"].min())
+    if entry - anchor < min_move:
+        return None
+    proposal = anchor + trail_mult * atr_now
+    proposal = min(proposal, entry - be_buffer)
+    return proposal if proposal < current_sl else None

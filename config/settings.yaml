@@ -2,29 +2,25 @@
 # Kill switch: default on. Override with KILL_SWITCH_ENABLED=false in .env for research only.
 
 # Exness Standard Cent uses the "m" suffix (EURUSDm / GBPUSDm).
-# Trend-following returns come from DIVERSIFICATION: more independent trends.
-# USD-quote and USD-base majors only — the backtest pip-value model does not
-# support crosses (EURJPY etc.). Re-run pull_data.py after changing this list.
+# USD-quote and USD-base majors only — backtest pip model does not support crosses.
 pairs: [EURUSDm, GBPUSDm, AUDUSDm, NZDUSDm, USDJPYm, USDCADm, USDCHFm]
 
 # Active strategy module: trend_pullback | breakout_trend | h4_trend | h4_pullback
 strategy: h4_pullback
 
 # --- Sizing (Exness Standard Cent) ---
-# $4000 deposit = balance 400000 (each unit is $0.01). NOT "4000 cents" ($40).
-# Backtest validated h4_pullback at 1% risk: PF 1.08, +$580 / 2y.
-# Aggressive profile below scales risk for $1,000+ swings — expect 25–40% DD.
+# $4000 deposit = balance 400000 (each unit is $0.01).
+# 1% risk baseline: PF 1.08, +$580 / 2y.  3.5% + 3R: PF 0.96, -$1080 (broke WR).
+# Sweet spot: fix edge first at 2R, then 2.5% risk for ~$1.5k+ target swings.
 
-risk_per_trade: 0.035 # 3.5% of equity per trade (was 1%)
-max_open_trades: 7 # total concurrent open trades across all pairs
-max_per_symbol: 1 # max concurrent open trades per symbol
-max_same_currency_bets: 4 # soft USD concentration cap
-daily_loss_limit: 0.10 # halt new entries after 10% down on the day
-max_drawdown_kill: 0.30 # kill switch at 30% below high-water mark
+risk_per_trade: 0.025 # 2.5% — thousand-$ months without 3.5% blow-up
+max_open_trades: 7
+max_per_symbol: 1
+max_same_currency_bets: 4
+daily_loss_limit: 0.07
+max_drawdown_kill: 0.22
 cooldown_after_loss_min: 10
 
-# h4_trend enters on H4 closes (00/04/08/12/16/20 UTC); a narrow session gate
-# silently discards most of them. Restore ["07:00","16:00"] for M15 strategies.
 session_utc: ["00:00", "23:59"]
 
 max_spread_pips:
@@ -36,13 +32,13 @@ max_spread_pips:
   USDCADm: 2.5
   USDCHFm: 2.5
 
-# Shared indicator periods (slow/fast EMAs used by both strategies)
+# Shared indicator periods
 trend_ema: 50
 pullback_ema: 20
 rsi_period: 14
 atr_period: 14
-atr_sl_mult: 1.2 # slightly tighter than v1 pullback (was 1.5)
-tp_r_multiple: 1.5 # 1.5R — easier target than 2R given historical WR ~34%
+atr_sl_mult: 1.2
+tp_r_multiple: 1.5
 spread_buffer_pips: 1.0
 
 # trend_pullback-only
@@ -52,37 +48,39 @@ swing_lookback: 10
 h1_slope_lookback: 5
 
 # breakout_trend-only
-breakout_lookback: 20 # Donchian channel length on M15
-min_trend_atr_frac: 0.15 # |EMA20-EMA50| must be >= this * H1 ATR
+breakout_lookback: 20
+min_trend_atr_frac: 0.15
 require_impulse_candle: true
 breakout_rsi_long_max: 70.0
 breakout_rsi_short_min: 30.0
 
-# h4_trend-only (Turtle-adapted Donchian on H4 resampled from H1)
-h4_breakout_lookback: 20 # H4 Donchian channel length (~3.3 days); tuned by run_walkforward.py
-h4_trend_ema: 50 # H4 regime EMA (~8 days)
-h4_slope_lookback: 3 # H4 bars back for EMA slope sign
+# Shared H4 params (h4_trend + h4_pullback)
+h4_trend_ema: 50
+h4_slope_lookback: 3
 h4_atr_period: 14
-h4_atr_sl_mult: 2.0 # initial stop = 2N (Turtle); tuned by run_walkforward.py
-h4_trail_atr_mult: 3.0 # chandelier trail distance; tuned by run_walkforward.py
-h4_tp_r_cap: 8.0 # far disaster-cap TP; the trail is the real exit
-h4_breakeven_after_atr: 1.5 # move SL to entry+buffer after this many ATRs in favor (0 = off)
-h4_min_slope_atr_frac: 0.0 # h4_trend chop filter (off for h4_pullback)
-h4_min_atr_percentile: 0 # h4_trend chop filter (off for h4_pullback)
+h4_trail_atr_mult: 2.5 # chandelier distance once runner trail is active
+h4_trail_start_atr: 1.0 # trail/BE only after 1N in favor (losers untouched)
+h4_breakeven_after_atr: 1.0 # legacy alias; trail_start_atr drives runner mode
+h4_min_slope_atr_frac: 0.06 # skip weak H4 trends
+h4_min_atr_percentile: 0
 h4_atr_percentile_lookback: 126
 
-# h4_pullback — enter on H4 dip/rally in trend, fixed 2R target (not Donchian breakout)
-h4_pullback_ema: 20 # fast EMA for pullback touch
-h4_pullback_lookback: 12 # H4 bars to wait for touch-back after extension
-h4_pullback_expiry: 4 # H4 bars pullback setup stays valid
-h4_pullback_extension_atr: 1.0 # extend this many ATRs from fast EMA before touch-back
-h4_pullback_tp_r: 3.0 # 3R — winners avg 163 pip MFE; was leaving money at 2R
-h4_swing_lookback: 8 # H4 bars for swing stop anchor
-# h4_pullback shares h4_trend_ema / h4_slope_lookback / h4_atr_period above;
-# tighter stop cuts loser MAE (was 83 pips avg at 1.3):
-h4_atr_sl_mult: 1.15
+# h4_trend-only (switch strategy: h4_trend to use these)
+h4_breakout_lookback: 20
+h4_atr_sl_mult: 1.25 # h4_pullback stop floor (h4_trend uses 2.0 if switched)
+h4_tp_r_cap: 8.0
 
-backtest_start_equity: 400000 # account units ($4000 on Exness Standard Cent: 1 unit = $0.01)
+# h4_pullback — dip/rally in trend; runner mode = far TP + trail on winners
+h4_pullback_ema: 20
+h4_pullback_lookback: 12
+h4_pullback_expiry: 4
+h4_pullback_extension_atr: 1.0
+h4_pullback_runners: true # true: 8R cap + trail exit | false: fixed 2R TP
+h4_pullback_tp_cap: 8.0 # disaster cap; trail is the real exit
+h4_pullback_tp_r: 2.0 # used only when h4_pullback_runners: false
+h4_pullback_max_age: 2
+h4_swing_lookback: 8
 
-# Default on. Override from .env with KILL_SWITCH_ENABLED=false for research backtests only.
+backtest_start_equity: 400000
+
 kill_switch_enabled: true

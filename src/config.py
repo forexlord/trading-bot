@@ -90,7 +90,11 @@ class Settings(BaseSettings):
     h4_pullback_expiry: int = 4
     h4_pullback_extension_atr: float = 1.0
     h4_pullback_tp_r: float = 2.0
+    h4_pullback_tp_cap: float = 8.0
+    h4_pullback_runners: bool = True  # far TP + trail exit (vs fixed tp_r)
+    h4_trail_start_atr: float = 1.0  # trail only after this many ATR in favor
     h4_swing_lookback: int = 8
+    h4_pullback_max_age: int = 2
 
     backtest_start_equity: float
 
