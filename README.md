@@ -6,10 +6,12 @@ via MetaTrader 5 through the [`mt5linux`](https://pypi.org/project/mt5linux/)
 RPyC bridge, against an Exness Standard Cent demo account.
 
 Architecture: **Market Data → Strategy Engine → Risk Manager → Execution**.
-Strategy ([src/strategy/trend_pullback.py](src/strategy/trend_pullback.py))
-and Risk ([src/risk/risk_manager.py](src/risk/risk_manager.py)) are pure
-functions of data with zero MT5 imports, so the backtester and the live bot
-run the *exact same code* — they only differ in data source and executor.
+Strategies live under [`src/strategy/`](src/strategy/) and are selected via
+`strategy:` in [`config/settings.yaml`](config/settings.yaml)
+(`trend_pullback` or `breakout_trend`). Risk
+([src/risk/risk_manager.py](src/risk/risk_manager.py)) is a pure function of
+data with zero MT5 imports, so the backtester and the live bot run the *exact
+same* strategy/risk code — they only differ in data source and executor.
 
 ## Prerequisites
 

@@ -18,7 +18,7 @@ PARAMS = SimpleNamespace(
     breakout_lookback=5,
     min_trend_atr_frac=0.05,
     require_impulse_candle=True,
-    breakout_rsi_long_max=80.0,
+    breakout_rsi_long_max=90.0,
     breakout_rsi_short_min=20.0,
 )
 
