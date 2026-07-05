@@ -49,15 +49,17 @@ max_spread_pips:
   USDCHFm: 2.5
 
 # --- h4_trend (Donchian breakout on H4, chandelier trail exit) ---
-h4_breakout_lookback: 20      # walk-forward tunes this
+# Values below are the WALK-FORWARD WINNERS (best in-sample score 1378.75 over
+# 2024-07 → 2025-07): wider stops + a stronger trend filter cut the chop losses.
+h4_breakout_lookback: 20
 h4_trend_ema: 50
 h4_slope_lookback: 3
 h4_atr_period: 14
-h4_atr_sl_mult: 2.0           # walk-forward tunes this — WIDE stop
-h4_trail_atr_mult: 3.0        # walk-forward tunes this — let winners run
+h4_atr_sl_mult: 2.5           # walk-forward winner — WIDE stop
+h4_trail_atr_mult: 3.0        # walk-forward winner — let winners run
 h4_tp_r_cap: 8.0
 h4_breakeven_after_atr: 2.0
-h4_min_slope_atr_frac: 0.05   # only trade meaningfully-sloped trends
+h4_min_slope_atr_frac: 0.12   # walk-forward winner — only strong trends
 h4_min_atr_percentile: 0
 h4_atr_percentile_lookback: 126
 

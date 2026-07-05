@@ -211,10 +211,6 @@ def main() -> None:
         "all_combos": results,
     }
 
-    out_path = log_root / "walkforward.json"
-    out_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
-    logger.info("Wrote %s", out_path)
-
     def _print_stats(label: str, s: dict) -> None:
         net_usd = s.get("net_pnl", 0) / 100.0
         dd = s.get("max_drawdown_pct")
@@ -228,10 +224,19 @@ def main() -> None:
             f"  maxDD={dd_s}"
         )
 
+    # Print results FIRST — a long search must never lose its output to a file
+    # write. The JSON dump below is best-effort.
     print(f"\n=== Walk-forward result ===")
     print(f"Best params: {best_combo}")
     _print_stats("Out-of-sample", oos_stats)
     _print_stats("Full period (with filters + risk tuning)", full_stats)
+
+    out_path = log_root / "walkforward.json"
+    try:
+        out_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        logger.info("Wrote %s", out_path)
+    except (TypeError, ValueError) as exc:
+        logger.warning("Could not write %s (%s) — results printed above stand.", out_path, exc)
 
     if args.apply_best:
         _apply_yaml_patch(config_path, best_combo)

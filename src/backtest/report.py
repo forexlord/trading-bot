@@ -85,7 +85,11 @@ def compute_stats(trades: pd.DataFrame, equity_curve: pd.DataFrame) -> dict:
     stats["longest_loss_streak"] = longest
 
     exit_month = pd.to_datetime(closed["exit_time"], unit="s", utc=True).dt.tz_localize(None).dt.to_period("M")
-    stats["monthly_pnl"] = closed.groupby(exit_month)["pnl"].sum().to_dict()
+    # Stringify Period keys so the dict is JSON-serializable (json.dumps default=str
+    # only handles bad values, not bad keys — this crashed run_walkforward).
+    stats["monthly_pnl"] = {
+        str(k): float(v) for k, v in closed.groupby(exit_month)["pnl"].sum().items()
+    }
 
     stats["mae_winners"] = _describe(wins["mae_pips"])
     stats["mae_losers"] = _describe(losses["mae_pips"])
