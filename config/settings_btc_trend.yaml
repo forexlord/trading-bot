@@ -1,0 +1,60 @@
+# BTC-only, BREAKOUT setup (h4_trend / Donchian). Companion to settings_btc.yaml
+# (which is the PULLBACK setup). Purpose: find out whether a SECOND big-move
+# setup type also has an edge on BTC. If yes, we combine pullback + breakout
+# into one bot that watches for both -> more trades, still on the H4 timeframe
+# where BTC's wide spread doesn't eat the move.
+#
+# NOT a scalper: on BTC the ~$20-80 spread makes small/frequent moves a losing
+# game. The edge lives in the big H4 trends; this just catches them a different way.
+#
+#   KILL_SWITCH_ENABLED=false .venv/bin/python run_period_backtest.py \
+#     --config config/settings_btc_trend.yaml --db data/forex_bot.db \
+#     --start 2024-09-05 --end 2026-07-03 \
+#     --log-dir logs/backtest/btc-trend --no-telegram
+
+pairs: [BTCUSDm]
+
+strategy: h4_trend
+
+risk_per_trade: 0.02
+max_open_trades: 1
+max_per_symbol: 1
+max_same_currency_bets: 1
+daily_loss_limit: 0.08
+max_drawdown_kill: 0.25
+cooldown_after_loss_min: 10
+
+session_utc: ["00:00", "23:59"]
+
+max_spread_pips:
+  BTCUSDm: 80.0
+
+trend_ema: 50
+pullback_ema: 20
+rsi_period: 14
+atr_period: 14
+atr_sl_mult: 1.2
+tp_r_multiple: 1.5
+spread_buffer_pips: 2.0
+
+pullback_lookback: 20
+pullback_expiry: 6
+swing_lookback: 10
+h1_slope_lookback: 5
+
+# h4_trend (Donchian breakout on H4, chandelier trail — lets big BTC trends run)
+h4_breakout_lookback: 20
+h4_trend_ema: 50
+h4_slope_lookback: 3
+h4_atr_period: 14
+h4_atr_sl_mult: 2.0
+h4_trail_atr_mult: 3.0
+h4_tp_r_cap: 8.0
+h4_breakeven_after_atr: 2.0
+h4_min_slope_atr_frac: 0.06
+h4_min_atr_percentile: 0
+h4_atr_percentile_lookback: 126
+
+backtest_start_equity: 400000   # $4,000 — BTC needs this to size at min lot
+
+kill_switch_enabled: true
