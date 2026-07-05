@@ -132,11 +132,13 @@ def _apply_yaml_patch(path: Path, updates: dict[str, Any]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", default="forex_bot.db")
+    parser.add_argument("--config", default=None, help="settings YAML to validate (default: config/settings.yaml)")
     parser.add_argument("--log-dir", default="logs/walkforward")
-    parser.add_argument("--apply-best", action="store_true", help="write winning params to settings.yaml")
+    parser.add_argument("--apply-best", action="store_true", help="write winning params to the loaded config")
     args = parser.parse_args()
 
-    settings = load_settings()
+    config_path = Path(args.config) if args.config else SETTINGS_YAML_PATH
+    settings = load_settings(config_path)
     from src.strategy import load_strategy
 
     strat = load_strategy(settings.strategy)
@@ -226,8 +228,8 @@ def main() -> None:
     _print_stats("Full period (with filters + risk tuning)", full_stats)
 
     if args.apply_best:
-        _apply_yaml_patch(SETTINGS_YAML_PATH, best_combo)
-        logger.info("Patched %s with best params", SETTINGS_YAML_PATH)
+        _apply_yaml_patch(config_path, best_combo)
+        logger.info("Patched %s with best params", config_path)
 
 
 if __name__ == "__main__":

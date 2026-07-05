@@ -1,0 +1,81 @@
+# Wide-stop trend-following on a CENT account — the evidence-based candidate.
+#
+# Why this shape (per Moskowitz/Ooi/Pedersen time-series-momentum evidence AND
+# our own backtests): H4 trend entries have WIDE stops, so the 1.5-3 pip spread
+# is ~4-5% of risk instead of the ~19% that killed the M15 trend_pullback run.
+# Fewer, higher-quality trades; winners trail to many-R; costs stay small.
+#
+# Risk held at a flat 1% for HONEST validation — we are measuring whether an
+# edge exists out-of-sample, not chasing P&L. Scale risk up only AFTER
+# walk-forward shows positive OOS profit factor. Validate with:
+#
+#   KILL_SWITCH_ENABLED=false .venv/bin/python run_walkforward.py \
+#     --config config/settings_wide_cent.yaml --db data/forex_bot.db \
+#     --log-dir logs/walkforward/wide-cent
+#
+# Or a quick full-period read (~45s, H4 only evaluates on H4 closes):
+#   KILL_SWITCH_ENABLED=false .venv/bin/python run_period_backtest.py \
+#     --config config/settings_wide_cent.yaml --db data/forex_bot.db \
+#     --start 2026-01-05 --end 2026-07-04 \
+#     --log-dir logs/backtest/wide-cent --no-telegram
+
+pairs: [EURUSDm, GBPUSDm, AUDUSDm, NZDUSDm, USDJPYm, USDCADm, USDCHFm]
+
+strategy: h4_trend
+contract_size: 1000
+
+risk_per_trade: 0.01
+
+allow_min_lot: true
+max_risk_when_min_lot: 0.02
+min_equity_cents: 500
+
+max_open_trades: 4
+max_per_symbol: 1
+max_same_currency_bets: 2
+daily_loss_limit: 0.06
+max_drawdown_kill: 0.35
+cooldown_after_loss_min: 30
+
+session_utc: ["00:00", "23:59"]
+
+max_spread_pips:
+  EURUSDm: 1.5
+  GBPUSDm: 2.0
+  AUDUSDm: 2.0
+  NZDUSDm: 3.0
+  USDJPYm: 2.0
+  USDCADm: 2.5
+  USDCHFm: 2.5
+
+# --- h4_trend (Donchian breakout on H4, chandelier trail exit) ---
+h4_breakout_lookback: 20      # walk-forward tunes this
+h4_trend_ema: 50
+h4_slope_lookback: 3
+h4_atr_period: 14
+h4_atr_sl_mult: 2.0           # walk-forward tunes this — WIDE stop
+h4_trail_atr_mult: 3.0        # walk-forward tunes this — let winners run
+h4_tp_r_cap: 8.0
+h4_breakeven_after_atr: 2.0
+h4_min_slope_atr_frac: 0.05   # only trade meaningfully-sloped trends
+h4_min_atr_percentile: 0
+h4_atr_percentile_lookback: 126
+
+# --- required base fields (unused by h4_trend but needed by the schema) ---
+trend_ema: 50
+pullback_ema: 20
+rsi_period: 14
+atr_period: 14
+atr_sl_mult: 1.2
+tp_r_multiple: 1.5
+spread_buffer_pips: 1.0
+pullback_lookback: 20
+pullback_expiry: 6
+swing_lookback: 10
+h1_slope_lookback: 5
+
+backtest_start_equity: 4000
+backtest_volume_min: 0.01
+backtest_volume_step: 0.01
+
+kill_switch_enabled: true
