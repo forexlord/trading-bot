@@ -1,0 +1,65 @@
+# Growth cent — VALIDATION run. Purpose: measure the strategy's raw edge over
+# the full period WITHOUT letting 5% risk or the equity floor truncate it.
+#
+# Read the result as expectancy, not as a P&L target:
+#   - PF > 1.1 and positive net over the full 6 months  -> a real edge exists,
+#     THEN we scale risk back up carefully.
+#   - PF <= 1.0  -> the strategy/params have no edge; changing risk won't help.
+#     Next step is entry filters or letting winners run (see notes below), or
+#     a different strategy — not a bigger bet.
+#
+# Changes vs settings_growth_cent.yaml (isolating cause):
+#   - risk 1% flat: small enough that the account survives the whole window,
+#     so we see all trades' expectancy instead of blowing the floor in week 2.
+#   - max_same_currency_bets: 1 + max_open_trades: 3: kills the 5-way USD stack
+#     that made losses arrive 5 at a time.
+
+pairs: [EURUSDm, GBPUSDm, AUDUSDm, NZDUSDm, USDJPYm, USDCADm, USDCHFm]
+
+strategy: trend_pullback
+contract_size: 1000
+
+risk_per_trade: 0.01
+# No growth tiers during validation — flat 1% so expectancy is readable.
+
+allow_min_lot: true
+max_risk_when_min_lot: 0.02
+min_equity_cents: 500        # low floor so the run isn't cut short
+
+max_open_trades: 3
+max_per_symbol: 1
+max_same_currency_bets: 1    # no correlated stacking (old binary block)
+daily_loss_limit: 0.06
+max_drawdown_kill: 0.35
+cooldown_after_loss_min: 15
+
+session_utc: ["00:00", "23:59"]
+
+max_spread_pips:
+  EURUSDm: 1.5
+  GBPUSDm: 2.0
+  AUDUSDm: 2.0
+  NZDUSDm: 3.0
+  USDJPYm: 2.0
+  USDCADm: 2.5
+  USDCHFm: 2.5
+
+# trend_pullback (H1 regime / M15 entries)
+trend_ema: 50
+pullback_ema: 20
+rsi_period: 14
+atr_period: 14
+atr_sl_mult: 1.2
+tp_r_multiple: 1.5
+spread_buffer_pips: 1.0
+
+pullback_lookback: 20
+pullback_expiry: 6
+swing_lookback: 10
+h1_slope_lookback: 5
+
+backtest_start_equity: 4000
+backtest_volume_min: 0.01
+backtest_volume_step: 0.01
+
+kill_switch_enabled: true
