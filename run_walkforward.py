@@ -38,9 +38,15 @@ logger = logging.getLogger("run_walkforward")
 WARMUP = pd.Timedelta(days=60)
 
 GRID = {
-    "h4_breakout_lookback": [15, 20, 25],
-    "h4_trail_atr_mult": [2.5, 3.0, 3.5],
+    # How established a trend must be before we enter (longer = fewer false breaks).
+    "h4_breakout_lookback": [20, 30],
+    # Initial stop width in ATRs.
     "h4_atr_sl_mult": [1.5, 2.0, 2.5],
+    # Trailing-stop width. WIDER = let winners run further, which is how a low
+    # win-rate trend trader stays profitable (big winners pay for many losers).
+    "h4_trail_atr_mult": [3.0, 4.0, 5.0],
+    # Minimum EMA slope (as a fraction of ATR) to trade — filters out chop.
+    "h4_min_slope_atr_frac": [0.05, 0.12],
 }
 
 MIN_IS_TRADES = 15
