@@ -253,3 +253,34 @@ def test_check_order_kill_switch_beats_daily_cap():
     verdict = evaluate(make_signal(), account, PARAMS)
     assert isinstance(verdict, Rejected)
     assert verdict.reason == "kill_switch"
+
+
+def test_crypto_not_blocked_by_forex_usd_stack():
+    """BTC entries must not be rejected because forex pairs already short USD."""
+    params = deepcopy(PARAMS)
+    params.session_utc = ["00:00", "23:59"]
+    params.max_open_trades = 5
+    params.max_same_currency_bets = 4
+    params.max_spread_pips = {"EURUSD": 1.5, "GBPUSD": 2.0, "AUDUSD": 2.0, "NZDUSD": 2.0, "BTCUSDm": 80.0}
+    account = make_account(
+        open_trades=[
+            OpenTrade(symbol="EURUSD", side="LONG"),
+            OpenTrade(symbol="GBPUSD", side="LONG"),
+            OpenTrade(symbol="AUDUSD", side="LONG"),
+            OpenTrade(symbol="NZDUSD", side="LONG"),
+        ]
+    )
+    btc_short = Signal(
+        symbol="BTCUSDm",
+        side="SHORT",
+        entry=97000.0,
+        sl=97500.0,
+        tp=93000.0,
+        sl_pips=500.0,
+        context=None,
+    )
+    verdict = evaluate(btc_short, account, params)
+    if isinstance(verdict, Rejected):
+        assert verdict.reason != "correlation"
+    else:
+        assert isinstance(verdict, Approved)

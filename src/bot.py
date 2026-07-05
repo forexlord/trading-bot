@@ -23,6 +23,7 @@ from src.risk import risk_manager as rm
 from src.state import BotState, StateStore, TradeState
 from src.strategy import load_strategy
 from src.strategy.common import Signal
+from src.symbol_config import resolve_symbol_config
 from src.telegram import TelegramAlerts
 
 HISTORY_BARS = 300
@@ -40,12 +41,21 @@ class Bot:
     def __init__(self, paper: bool, db_path: str = "forex_bot.db", state_path: str = "state/state.json", log_dir: str = "logs"):
         self.settings: Settings = load_settings()
         self.secrets = load_secrets()
-        self.strat = load_strategy(getattr(self.settings, "strategy", "trend_pullback"))
+        self._strat_by_symbol = {}
+        self._params_by_symbol = {}
+        for sym in self.settings.pairs:
+            strat_name, sym_params = resolve_symbol_config(self.settings, sym)
+            self._strat_by_symbol[sym] = load_strategy(strat_name)
+            self._params_by_symbol[sym] = sym_params
+        self.strat = self._strat_by_symbol[self.settings.pairs[0]]
         # Higher timeframe the strategy consumes (H1 default; h4_trend uses H4).
         self.htf: str = getattr(self.strat, "HTF", "H1")
         self.logger = console_logger("bot")
         self.paper = paper
         self.logger.info("Strategy: %s", getattr(self.settings, "strategy", "trend_pullback"))
+        for sym, mod in self._strat_by_symbol.items():
+            if mod is not self.strat:
+                self.logger.info("  %s -> %s", sym, mod.__name__.split(".")[-1])
 
         self.client = MT5Client(
             host=self.secrets.mt5_host,
@@ -205,15 +215,16 @@ class Bot:
     def _maybe_trail(self, symbol: str, trade: TradeState, position: dict | None) -> None:
         """Apply the strategy's trailing-stop proposal (ratchet only). In live
         mode the broker SL is modified too; in paper mode only local state."""
-        update_fn = getattr(self.strat, "update_stop", None)
+        update_fn = getattr(self._strat_by_symbol.get(symbol, self.strat), "update_stop", None)
         if update_fn is None:
             return
         htf = self._closed_rates(symbol, self.htf)
         m15 = self._closed_rates(symbol, "M15")
         if htf.empty or m15.empty:
             return
+        sym_params = self._params_by_symbol[symbol]
         proposal = update_fn(
-            symbol, trade.side, trade.entry, trade.entry_time, trade.sl, htf, m15, self.settings,
+            symbol, trade.side, trade.entry, trade.entry_time, trade.sl, htf, m15, sym_params,
             initial_sl=trade.initial_sl or trade.sl,
         )
         if proposal is None:
@@ -234,7 +245,7 @@ class Bot:
     def _update_excursion(self, symbol: str, trade: TradeState) -> None:
         tick = self.client.symbol_info_tick(symbol)
         price = tick["bid"] if trade.side == "LONG" else tick["ask"]
-        pip = self.strat.pip_size(symbol)
+        pip = self._strat_by_symbol[symbol].pip_size(symbol)
         if trade.side == "LONG":
             trade.mae_pips = max(trade.mae_pips, (trade.entry - price) / pip)
             trade.mfe_pips = max(trade.mfe_pips, (price - trade.entry) / pip)
@@ -250,7 +261,7 @@ class Bot:
         outcome: str | None = None,
         exit_price: float | None = None,
     ) -> None:
-        pip = self.strat.pip_size(symbol)
+        pip = self._strat_by_symbol[symbol].pip_size(symbol)
         if outcome is None:
             tick = self.client.symbol_info_tick(symbol)
             last_price = tick["bid"] if trade.side == "LONG" else tick["ask"]
@@ -309,16 +320,18 @@ class Bot:
         if htf.empty or len(m15) < 2:
             return
 
-        eval_with_ctx = getattr(self.strat, "evaluate_with_context", None)
+        strat = self._strat_by_symbol[symbol]
+        sym_params = self._params_by_symbol[symbol]
+        eval_with_ctx = getattr(strat, "evaluate_with_context", None)
         if eval_with_ctx is not None:
-            ctx, signal = eval_with_ctx(symbol, htf, m15, self.settings)
+            ctx, signal = eval_with_ctx(symbol, htf, m15, sym_params)
         else:
-            ctx = self.strat.compute_context(symbol, htf, m15, self.settings)
-            signal = self.strat.evaluate(symbol, htf, m15, self.settings) if symbol not in self.state.open_trades else None
+            ctx = strat.compute_context(symbol, htf, m15, sym_params)
+            signal = strat.evaluate(symbol, htf, m15, sym_params) if symbol not in self.state.open_trades else None
         if symbol in self.state.open_trades:
             signal = None
 
-        pip = self.strat.pip_size(symbol)
+        pip = strat.pip_size(symbol)
         spread_pips = self.client.spread_pips(symbol, pip)
 
         verdict = None
@@ -326,7 +339,7 @@ class Bot:
         lots = None
         if signal is not None:
             account_state = self._build_account_state(symbol, now, equity, balance, spread_pips)
-            verdict = rm.evaluate(signal, account_state, self.settings)
+            verdict = rm.evaluate(signal, account_state, sym_params)
             if isinstance(verdict, rm.Rejected):
                 reject_reason = verdict.reason
             else:
@@ -364,7 +377,7 @@ class Bot:
         self, symbol: str, now: datetime, equity: float, balance: float, spread_pips: float
     ) -> rm.AccountState:
         symbol_info_raw = self.client.symbol_info(symbol)
-        pip = self.strat.pip_size(symbol)
+        pip = self._strat_by_symbol[symbol].pip_size(symbol)
         symbol_info = rm.SymbolInfo(
             pip_value_per_lot=self.client.pip_value_per_lot(symbol, pip),
             volume_step=symbol_info_raw["volume_step"],

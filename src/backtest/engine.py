@@ -21,6 +21,7 @@ from src.logger import DecisionLogger, EquityLogger, TradeLogger
 from src.risk import risk_manager as rm
 from src.strategy import load_strategy
 from src.strategy.common import Context, Signal, pip_size
+from src.symbol_config import resolve_symbol_config
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +125,15 @@ class BacktestEngine:
         self.equity_history: list[dict] = []
         self._trade_seq = 0
 
-        self.strat = load_strategy(getattr(params, "strategy", "trend_pullback"))
+        self._strat_by_symbol: dict[str, Any] = {}
+        self._params_by_symbol: dict[str, Any] = {}
+        default_strat = load_strategy(getattr(params, "strategy", "trend_pullback"))
+        if data:
+            for sym in data:
+                strat_name, sym_params = resolve_symbol_config(params, sym)
+                self._strat_by_symbol[sym] = load_strategy(strat_name)
+                self._params_by_symbol[sym] = sym_params
+        self.strat = self._strat_by_symbol[next(iter(data))] if data else default_strat
         # Higher timeframe the strategy consumes (H1 default; h4_trend uses H4).
         # _SymbolData.h1 carries bars of THIS timeframe — callers must load it.
         self.htf: str = getattr(self.strat, "HTF", "H1")
@@ -134,13 +143,14 @@ class BacktestEngine:
         # 15 of every 16 bars. Uses actual bar times, so any broker HTF
         # alignment works.
         self._decides_on_htf_close = bool(getattr(self.strat, "DECIDES_ON_HTF_CLOSE", False))
-        # Single-pass context+signal, if the strategy offers it (halves work).
-        self._eval_with_ctx = getattr(self.strat, "evaluate_with_context", None)
         self.decision_log = DecisionLogger(log_dir)
         self.trade_log = TradeLogger(log_dir)
         self.equity_log = EquityLogger(log_dir)
         self._last_equity_log_hour: Any = None
         logger.info("Strategy: %s", getattr(params, "strategy", "trend_pullback"))
+        for sym, mod in self._strat_by_symbol.items():
+            if mod is not self.strat:
+                logger.info("  %s -> %s", sym, mod.__name__.split(".")[-1])
 
         # Pre-index bars so the main loop is O(1) per symbol per timestamp
         # instead of scanning full DataFrames every bar.
@@ -277,7 +287,7 @@ class BacktestEngine:
         Gated to H1 boundaries: trailing anchors move at most once per H1/H4
         bar, so recomputing on all 4 intra-hour M15 closes is pure waste.
         """
-        update_fn = getattr(self.strat, "update_stop", None)
+        update_fn = getattr(self._strat_by_symbol.get(symbol, self.strat), "update_stop", None)
         if update_fn is None or ts.minute != 45:
             return
         position = self.open_trades.get(symbol)
@@ -288,12 +298,13 @@ class BacktestEngine:
         # HTF-close strategies: the trail anchor/ATR only move on HTF closes.
         if self._decides_on_htf_close and not self._is_htf_decision_bar(h1_slice, ts):
             return
+        sym_params = self._params_by_symbol[symbol]
         trail_kwargs: dict = {}
         if "initial_sl" in inspect.signature(update_fn).parameters:
             trail_kwargs["initial_sl"] = position.initial_sl
         proposal = update_fn(
             symbol, position.side, position.entry, position.entry_time,
-            position.sl, h1_slice, m15_slice, self.params,
+            position.sl, h1_slice, m15_slice, sym_params,
             **trail_kwargs,
         )
         if proposal is None:
@@ -345,18 +356,21 @@ class BacktestEngine:
                                                        False, None), None, None, None)
             return
 
-        if self._eval_with_ctx is not None:
-            ctx, signal = self._eval_with_ctx(symbol, h1_slice, m15_slice, self.params)
+        strat = self._strat_by_symbol[symbol]
+        sym_params = self._params_by_symbol[symbol]
+        eval_with_ctx = getattr(strat, "evaluate_with_context", None)
+        if eval_with_ctx is not None:
+            ctx, signal = eval_with_ctx(symbol, h1_slice, m15_slice, sym_params)
         else:
-            ctx = self.strat.compute_context(symbol, h1_slice, m15_slice, self.params)
-            signal = self.strat.evaluate(symbol, h1_slice, m15_slice, self.params)
+            ctx = strat.compute_context(symbol, h1_slice, m15_slice, sym_params)
+            signal = strat.evaluate(symbol, h1_slice, m15_slice, sym_params)
 
         verdict = None
         reject_reason = None
         lots = None
         if signal is not None:
             account = self._account_state(symbol, ts, price=signal.entry)
-            verdict = rm.evaluate(signal, account, self.params)
+            verdict = rm.evaluate(signal, account, sym_params)
             if isinstance(verdict, rm.Rejected):
                 reject_reason = verdict.reason
             else:
@@ -392,7 +406,8 @@ class BacktestEngine:
         self.decision_log.write(record, ts=ts.to_pydatetime())
 
     def _assumed_spread_pips(self, symbol: str) -> float:
-        return self.params.max_spread_pips.get(symbol, 0.0)
+        spreads = self._params_by_symbol[symbol].max_spread_pips
+        return spreads.get(symbol, 0.0)
 
     def _account_state(self, symbol: str, ts: pd.Timestamp, price: float) -> rm.AccountState:
         if getattr(self.params, "kill_switch_enabled", True):

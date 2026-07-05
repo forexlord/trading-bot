@@ -102,6 +102,9 @@ class Settings(BaseSettings):
 
     kill_switch_enabled: bool = True
 
+    # Optional per-asset-class overrides (see config/settings.yaml).
+    symbol_profiles: dict[str, dict[str, Any]] = {}
+
     @classmethod
     def load(cls, path: Path = SETTINGS_YAML_PATH) -> "Settings":
         with open(path, "r") as f:

@@ -1,7 +1,7 @@
 # Forex bot configuration.
 # Kill switch: default on. Override with KILL_SWITCH_ENABLED=false in .env for research only.
 
-pairs: [EURUSDm, GBPUSDm, AUDUSDm, NZDUSDm, USDJPYm, USDCADm, USDCHFm]
+pairs: [EURUSDm, GBPUSDm, AUDUSDm, NZDUSDm, USDJPYm, USDCADm, USDCHFm, BTCUSDm]
 
 strategy: h4_pullback
 
@@ -10,7 +10,7 @@ strategy: h4_pullback
 # Fix: min 1.25R lock on trail exits + cap stop width; keep 2.5% until PF>1.05.
 
 risk_per_trade: 0.025
-max_open_trades: 7
+max_open_trades: 8
 max_per_symbol: 1
 max_same_currency_bets: 4
 daily_loss_limit: 0.07
@@ -27,6 +27,7 @@ max_spread_pips:
   USDJPYm: 2.0
   USDCADm: 2.5
   USDCHFm: 2.5
+  BTCUSDm: 80.0
 
 trend_ema: 50
 pullback_ema: 20
@@ -76,3 +77,10 @@ h4_swing_lookback: 8
 backtest_start_equity: 400000
 
 kill_switch_enabled: true
+
+# Instrument-specific limits only (same strategy + risk as forex defaults above).
+symbol_profiles:
+  crypto:
+    symbols: [BTCUSDm]
+    max_spread_pips:
+      BTCUSDm: 80.0

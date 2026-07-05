@@ -88,10 +88,19 @@ def _within_session(now_utc: datetime, session_utc: list[str]) -> bool:
     return now >= start or now <= end  # overnight session, wraps midnight
 
 
+def _is_crypto(symbol: str) -> bool:
+    base = symbol.upper().rstrip("MCI")
+    return base.startswith("BTC") or base.startswith("ETH")
+
+
 def _currency_bets(symbol: str, side: str) -> dict[str, int]:
     base, quote = symbol[:3], symbol[3:6]
     sign = 1 if side == "LONG" else -1
-    return {base: sign, quote: -sign}
+    bets = {base: sign, quote: -sign}
+    # Crypto USD leg is not counted against forex USD concentration.
+    if _is_crypto(symbol):
+        del bets[quote]
+    return bets
 
 
 def _max_shared_bet_count(signal: Signal, open_trades: list[OpenTrade]) -> int:
