@@ -114,6 +114,7 @@ class BacktestEngine:
         start_equity: float,
         timeline_start: pd.Timestamp | None = None,
         timeline_end: pd.Timestamp | None = None,
+        monthly_deposit: float = 0.0,
     ):
         self.data = data
         self.params = params
@@ -123,6 +124,13 @@ class BacktestEngine:
         self.hwm = start_equity
         self.day_start_equity = start_equity
         self.current_day: Any = None
+        # Recurring deposit applied on the first trading day of each NEW calendar
+        # month after the start month (the start month's contribution is
+        # start_equity). Grows the balance -> risk sizing scales up over time.
+        self._monthly_deposit = float(monthly_deposit or 0.0)
+        self.current_month: Any = None
+        self.deposits: dict[Any, float] = {}   # date -> cents added that day
+        self.total_deposited = 0.0
         self.kill_switch_triggered = False
         self._timeline_start = timeline_start
         self._timeline_end = timeline_end
@@ -215,10 +223,24 @@ class BacktestEngine:
         day = ts.date()
         if self.current_day is None:
             self.current_day = day
+            self.current_month = (day.year, day.month)
             self.day_start_equity = self.equity
-        elif day != self.current_day:
+            return
+        if day != self.current_day:
             self.current_day = day
-            self.day_start_equity = self.equity
+            month = (day.year, day.month)
+            if self._monthly_deposit and month != self.current_month:
+                self._apply_deposit(day)
+            self.current_month = month
+            self.day_start_equity = self.equity  # measured after any deposit
+
+    def _apply_deposit(self, day: Any) -> None:
+        amt = self._monthly_deposit
+        self.balance += amt
+        self.equity = self.balance
+        self.hwm = max(self.hwm, self.equity)  # deposit isn't a drawdown recovery
+        self.deposits[day] = self.deposits.get(day, 0.0) + amt
+        self.total_deposited += amt
 
     # -- exits ---------------------------------------------------------------
 

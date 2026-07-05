@@ -86,6 +86,13 @@ def main() -> None:
     parser.add_argument("--end", type=parse_date, default=parse_date(DEFAULT_END))
     parser.add_argument("--warmup-days", type=int, default=WARMUP_DAYS)
     parser.add_argument("--equity", type=float, default=None)
+    parser.add_argument(
+        "--monthly-deposit",
+        type=float,
+        default=0.0,
+        help="recurring USD contribution added on the 1st trading day of each "
+        "new month (e.g. 40 = fund $40/month). The start balance is month 1.",
+    )
     parser.add_argument("--no-telegram", action="store_true")
     parser.add_argument(
         "--config",
@@ -127,6 +134,7 @@ def main() -> None:
     data = load_data(store, settings.pairs, htf, load_start, period_end)
     store.close()
 
+    monthly_deposit_cents = args.monthly_deposit * 100.0  # USD -> cents
     engine = BacktestEngine(
         data=data,
         params=settings,
@@ -134,6 +142,7 @@ def main() -> None:
         start_equity=start_equity,
         timeline_start=ts_start,
         timeline_end=ts_end,
+        monthly_deposit=monthly_deposit_cents,
     )
     engine.run()
 
@@ -141,7 +150,8 @@ def main() -> None:
     equity_curve = pd.DataFrame(engine.equity_history)
 
     rollups = compute_period_rollups(
-        equity_curve, trades, start_equity, period_start, period_end
+        equity_curve, trades, start_equity, period_start, period_end,
+        deposits=engine.deposits,
     )
     print_period_report(rollups, trades, equity_curve, str(log_dir))
 
@@ -158,6 +168,9 @@ def main() -> None:
         "period_start": period_start.isoformat(),
         "period_end": period_end.isoformat(),
         "start_equity_cents": start_equity,
+        "monthly_deposit_cents": monthly_deposit_cents,
+        "total_deposited_cents": engine.total_deposited,
+        "end_equity_cents": engine.balance,
         "rollups": {
             k: v
             for k, v in rollups.items()
