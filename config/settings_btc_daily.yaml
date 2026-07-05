@@ -1,0 +1,57 @@
+# BTC daily-trading, GUARDRAILS OFF — the "just trade every day, don't reject" test.
+#
+# Per request: ignore lot-size / risk-cap rejections. Take EVERY signal at
+# minimum lot. Nothing stops trading except the account actually going broke
+# (insolvency = the broker closing you out); monthly deposits then refill it.
+#
+# trend_pullback = H1 regime + M15 entries -> trades most days.
+#
+# WHAT THIS IS: a stress test, NOT a strategy. On a $40 account, BTC's 0.01 min
+# lot risks ~10%+ per trade (min lot is far bigger than sane sizing allows), so
+# expect violent swings and probable blow-ups that the $40/month refills. It
+# conflates "does daily trading have an edge" with "reckless position sizing."
+#
+#   KILL_SWITCH_ENABLED=false .venv/bin/python run_period_backtest.py \
+#     --config config/settings_btc_daily.yaml --db data/forex_bot.db \
+#     --start 2024-09-05 --end 2026-07-03 --monthly-deposit 40 \
+#     --log-dir logs/backtest/btc-daily --no-telegram
+
+pairs: [BTCUSDm]
+
+strategy: trend_pullback
+
+risk_per_trade: 0.02
+
+# --- guardrails OFF: never reject for lot size / risk being "too big" ---
+allow_min_lot: true
+max_risk_when_min_lot: 5.0    # 500% cap = effectively never reject on min lot
+min_equity_cents: 0           # no "equity too low" stop
+daily_loss_limit: 0.99        # no daily cap
+max_drawdown_kill: 0.99       # no drawdown kill
+kill_switch_enabled: false    # only insolvency (broker close-out) stops trading
+
+max_open_trades: 1
+max_per_symbol: 1
+max_same_currency_bets: 1
+cooldown_after_loss_min: 10
+
+session_utc: ["00:00", "23:59"]
+
+max_spread_pips:
+  BTCUSDm: 40.0   # real Exness BTC spread swings 20-80; result is sensitive to this
+
+# trend_pullback (H1 regime / M15 entries) — highest-frequency setup we have
+trend_ema: 50
+pullback_ema: 20
+rsi_period: 14
+atr_period: 14
+atr_sl_mult: 1.2
+tp_r_multiple: 1.5
+spread_buffer_pips: 2.0
+
+pullback_lookback: 20
+pullback_expiry: 6
+swing_lookback: 10
+h1_slope_lookback: 5
+
+backtest_start_equity: 4000   # $40 — your real starting balance
