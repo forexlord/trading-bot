@@ -128,21 +128,31 @@ def _floor_to_step(value: float, step: float) -> float:
     return float(whole_steps * d_step)
 
 
-def effective_risk_per_trade(balance: float, params: Any) -> float:
-    """Return risk fraction for current balance (growth tiers or flat risk_per_trade).
-
-    ``growth_risk_tiers`` is a list of ``{until_equity, risk_per_trade}`` sorted
-    by ascending ``until_equity`` (account currency cents). The first tier whose
-    ``until_equity`` >= balance wins; above the last tier uses that tier's risk.
-    """
+def _growth_tier(balance: float, params: Any) -> dict[str, Any] | None:
     tiers = getattr(params, "growth_risk_tiers", None) or []
     if not tiers:
-        return float(params.risk_per_trade)
+        return None
     ordered = sorted(tiers, key=lambda t: float(t["until_equity"]))
     for tier in ordered:
         if balance <= float(tier["until_equity"]):
-            return float(tier["risk_per_trade"])
-    return float(ordered[-1]["risk_per_trade"])
+            return tier
+    return ordered[-1]
+
+
+def effective_risk_per_trade(balance: float, params: Any) -> float:
+    """Return risk fraction for current balance (growth tiers or flat risk_per_trade)."""
+    tier = _growth_tier(balance, params)
+    if tier is not None:
+        return float(tier["risk_per_trade"])
+    return float(params.risk_per_trade)
+
+
+def effective_max_risk_when_min_lot(balance: float, params: Any) -> float:
+    """Max account fraction when bumping to broker min lot on a tiny balance."""
+    tier = _growth_tier(balance, params)
+    if tier is not None and tier.get("max_risk_when_min_lot") is not None:
+        return float(tier["max_risk_when_min_lot"])
+    return float(getattr(params, "max_risk_when_min_lot", 0.05))
 
 
 def evaluate(signal: Signal, account: AccountState, params: Any) -> Verdict:
@@ -207,7 +217,7 @@ def evaluate(signal: Signal, account: AccountState, params: Any) -> Verdict:
 
     actual_risk = lots * signal.sl_pips * pip_value_per_lot
     if lots == min_lot and bool(getattr(params, "allow_min_lot", False)) and raw_lots < min_lot:
-        cap = account.balance * float(getattr(params, "max_risk_when_min_lot", 0.05))
+        cap = account.balance * effective_max_risk_when_min_lot(account.balance, params)
         if actual_risk > cap * 1.05:
             return Rejected("lot_size_too_small")
     elif actual_risk > risk_amount * 1.05:

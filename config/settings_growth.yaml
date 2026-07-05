@@ -1,36 +1,42 @@
 # Growth mode — start $40, scale risk as equity grows (cents: 4000 = $40).
-# Same strategy/guardrails as settings.yaml; only sizing differs by balance tier.
 #
-# Tier logic: use the first tier whose until_equity >= current balance.
-# allow_min_lot: take 0.01 lots when needed, capped at max_risk_when_min_lot (5%).
+# Small accounts must use 0.01 lots; H4 stops are often 40–100 pips, so the
+# min-lot risk cap must be higher at low balances or almost every signal is
+# rejected (lot_size_too_small). Caps tighten automatically as equity grows.
+#
+# Forex majors only until $200+ — BTC wide stops block micro accounts.
+# Add BTCUSDm back to pairs manually once balance > $200.
 #
 #   KILL_SWITCH_ENABLED=false .venv/bin/python run_period_backtest.py \
 #     --config config/settings_growth.yaml --db data/forex_bot.db \
 #     --start 2026-01-05 --end 2026-07-04 \
 #     --log-dir logs/backtest/growth-period --no-telegram
 
-pairs: [EURUSDm, GBPUSDm, AUDUSDm, NZDUSDm, USDJPYm, USDCADm, USDCHFm, BTCUSDm]
+pairs: [EURUSDm, GBPUSDm, AUDUSDm, NZDUSDm, USDJPYm, USDCADm, USDCHFm]
 
 strategy: h4_pullback
 
 risk_per_trade: 0.025
 
-# Balance (cents) → risk fraction. Grows with the account like a disciplined trader.
 growth_risk_tiers:
-  - until_equity: 8000    # $0–$80:   1.0%
+  - until_equity: 8000    # $0–$80
     risk_per_trade: 0.01
-  - until_equity: 20000   # $80–$200: 1.5%
+    max_risk_when_min_lot: 0.18   # ~$7 on $40 — fits typical H4 stop at 0.01 lot
+  - until_equity: 20000   # $80–$200
     risk_per_trade: 0.015
-  - until_equity: 50000   # $200–$500: 2.0%
+    max_risk_when_min_lot: 0.12
+  - until_equity: 50000   # $200–$500
     risk_per_trade: 0.02
+    max_risk_when_min_lot: 0.08
   - until_equity: 100000000
     risk_per_trade: 0.025
+    max_risk_when_min_lot: 0.05
 
 allow_min_lot: true
 max_risk_when_min_lot: 0.05
 min_equity_cents: 1500
 
-max_open_trades: 8
+max_open_trades: 7
 max_per_symbol: 1
 max_same_currency_bets: 4
 daily_loss_limit: 0.07
@@ -47,7 +53,6 @@ max_spread_pips:
   USDJPYm: 2.0
   USDCADm: 2.5
   USDCHFm: 2.5
-  BTCUSDm: 80.0
 
 trend_ema: 50
 pullback_ema: 20
@@ -97,9 +102,3 @@ h4_swing_lookback: 8
 backtest_start_equity: 4000
 
 kill_switch_enabled: true
-
-symbol_profiles:
-  crypto:
-    symbols: [BTCUSDm]
-    max_spread_pips:
-      BTCUSDm: 80.0
