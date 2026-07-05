@@ -11,6 +11,7 @@ from src.risk.risk_manager import (
     OpenTrade,
     Rejected,
     SymbolInfo,
+    effective_risk_per_trade,
     evaluate,
 )
 from src.strategy.common import Signal
@@ -284,3 +285,39 @@ def test_crypto_not_blocked_by_forex_usd_stack():
         assert verdict.reason != "correlation"
     else:
         assert isinstance(verdict, Approved)
+
+
+def test_growth_risk_tiers_scale_with_balance():
+    params = SimpleNamespace(
+        growth_risk_tiers=[
+            {"until_equity": 8000, "risk_per_trade": 0.01},
+            {"until_equity": 20000, "risk_per_trade": 0.015},
+            {"until_equity": 100000000, "risk_per_trade": 0.025},
+        ],
+        risk_per_trade=0.025,
+    )
+    assert effective_risk_per_trade(4000, params) == pytest.approx(0.01)
+    assert effective_risk_per_trade(15000, params) == pytest.approx(0.015)
+    assert effective_risk_per_trade(50000, params) == pytest.approx(0.025)
+
+
+def test_allow_min_lot_when_forced_risk_within_cap():
+    params = deepcopy(PARAMS)
+    params.growth_risk_tiers = []
+    params.allow_min_lot = True
+    params.max_risk_when_min_lot = 0.05
+    params.risk_per_trade = 0.01
+    params.kill_switch_enabled = False
+    params.session_utc = ["00:00", "23:59"]
+    # balance 4000 cents, 1% target = 40 cents; wide stop -> raw lots 0.008 -> min 0.01
+    account = make_account(balance=4000.0)
+    verdict = evaluate(make_signal(sl_pips=50.0), account, params)
+    assert isinstance(verdict, Approved)
+    assert verdict.lots == pytest.approx(0.01)
+
+
+def test_insolvent_account_rejects():
+    account = make_account(balance=0.0, equity=0.0)
+    verdict = evaluate(make_signal(), account, PARAMS)
+    assert isinstance(verdict, Rejected)
+    assert verdict.reason == "insolvent"

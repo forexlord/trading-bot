@@ -128,7 +128,30 @@ def _floor_to_step(value: float, step: float) -> float:
     return float(whole_steps * d_step)
 
 
+def effective_risk_per_trade(balance: float, params: Any) -> float:
+    """Return risk fraction for current balance (growth tiers or flat risk_per_trade).
+
+    ``growth_risk_tiers`` is a list of ``{until_equity, risk_per_trade}`` sorted
+    by ascending ``until_equity`` (account currency cents). The first tier whose
+    ``until_equity`` >= balance wins; above the last tier uses that tier's risk.
+    """
+    tiers = getattr(params, "growth_risk_tiers", None) or []
+    if not tiers:
+        return float(params.risk_per_trade)
+    ordered = sorted(tiers, key=lambda t: float(t["until_equity"]))
+    for tier in ordered:
+        if balance <= float(tier["until_equity"]):
+            return float(tier["risk_per_trade"])
+    return float(ordered[-1]["risk_per_trade"])
+
+
 def evaluate(signal: Signal, account: AccountState, params: Any) -> Verdict:
+    min_eq = float(getattr(params, "min_equity_cents", 0) or 0)
+    if account.balance <= 0 or account.equity <= 0:
+        return Rejected("insolvent")
+    if min_eq > 0 and account.balance < min_eq:
+        return Rejected("equity_too_low")
+
     if getattr(params, "kill_switch_enabled", True):
         kill_threshold = account.hwm * (1 - params.max_drawdown_kill)
         if account.kill_switch_triggered or account.equity <= kill_threshold:
@@ -170,19 +193,24 @@ def evaluate(signal: Signal, account: AccountState, params: Any) -> Verdict:
     if signal.sl_pips <= 0:
         return Rejected("invalid_stop")
 
-    risk_amount = account.balance * params.risk_per_trade
+    risk_pct = effective_risk_per_trade(account.balance, params)
+    risk_amount = account.balance * risk_pct
     pip_value_per_lot = account.symbol_info.pip_value_per_lot
     raw_lots = risk_amount / (signal.sl_pips * pip_value_per_lot)
     lots = _floor_to_step(raw_lots, account.symbol_info.volume_step)
+    min_lot = account.symbol_info.volume_min
 
-    if lots < account.symbol_info.volume_min:
-        return Rejected("lot_size_too_small")
+    if lots < min_lot:
+        if not bool(getattr(params, "allow_min_lot", False)):
+            return Rejected("lot_size_too_small")
+        lots = min_lot
 
     actual_risk = lots * signal.sl_pips * pip_value_per_lot
-    # Defensive only: flooring down to volume_step (never rounding up to
-    # volume_min) makes actual_risk <= risk_amount mathematically guaranteed,
-    # but the explicit cap stays as a guard against a bad symbol_info input.
-    if actual_risk > risk_amount * 1.05:
+    if lots == min_lot and bool(getattr(params, "allow_min_lot", False)) and raw_lots < min_lot:
+        cap = account.balance * float(getattr(params, "max_risk_when_min_lot", 0.05))
+        if actual_risk > cap * 1.05:
+            return Rejected("lot_size_too_small")
+    elif actual_risk > risk_amount * 1.05:
         return Rejected("risk_exceeds_cap")
 
     return Approved(lots=lots, entry=signal.entry, sl=signal.sl, tp=signal.tp, risk_amount=actual_risk)

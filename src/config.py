@@ -105,6 +105,12 @@ class Settings(BaseSettings):
     backtest_volume_min: float | None = None
     backtest_volume_step: float | None = None
 
+    # Small-account growth: tier risk by balance, allow broker min lot within a cap.
+    growth_risk_tiers: list[dict[str, float]] = []
+    allow_min_lot: bool = False
+    max_risk_when_min_lot: float = 0.05
+    min_equity_cents: float = 0
+
     kill_switch_enabled: bool = True
 
     # Optional per-asset-class overrides (see config/settings.yaml).
