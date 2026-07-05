@@ -99,6 +99,8 @@ class BacktestEngine:
         params: Any,
         log_dir: str,
         start_equity: float,
+        timeline_start: pd.Timestamp | None = None,
+        timeline_end: pd.Timestamp | None = None,
     ):
         self.data = data
         self.params = params
@@ -108,6 +110,8 @@ class BacktestEngine:
         self.day_start_equity = start_equity
         self.current_day: Any = None
         self.kill_switch_triggered = False
+        self._timeline_start = timeline_start
+        self._timeline_end = timeline_end
 
         self.open_trades: dict[str, OpenPosition] = {}
         self.last_trade_by_symbol: dict[str, rm.LastTradeInfo] = {}
@@ -169,7 +173,12 @@ class BacktestEngine:
         all_times: set[Any] = set()
         for by_time in self._m15_by_time.values():
             all_times.update(by_time)
-        return sorted(all_times)
+        times = sorted(all_times)
+        if self._timeline_start is not None:
+            times = [t for t in times if t >= self._timeline_start]
+        if self._timeline_end is not None:
+            times = [t for t in times if t <= self._timeline_end]
+        return times
 
     def _symbols_at(self, ts: pd.Timestamp) -> dict[str, int]:
         result = {}
