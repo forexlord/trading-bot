@@ -418,7 +418,9 @@ class BacktestEngine:
             self.kill_switch_triggered = False
 
         pip_value = assumed_pip_value_per_lot(symbol, price)
-        symbol_info = rm.SymbolInfo(pip_value_per_lot=pip_value, volume_step=0.01, volume_min=0.01)
+        vol_min = float(getattr(self.params, "backtest_volume_min", None) or 0.01)
+        vol_step = float(getattr(self.params, "backtest_volume_step", None) or vol_min)
+        symbol_info = rm.SymbolInfo(pip_value_per_lot=pip_value, volume_step=vol_step, volume_min=vol_min)
 
         return rm.AccountState(
             equity=self.equity,

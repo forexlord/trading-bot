@@ -1,0 +1,89 @@
+# One-month flip research — $40 → target $1000+, guardrails fully off.
+# RESEARCH ONLY. Uses simulated 0.001 lots in backtest (live Exness min = 0.01).
+#
+# One month:
+#   KILL_SWITCH_ENABLED=false .venv/bin/python run_period_backtest.py \
+#     --config config/settings_flip.yaml --db data/forex_bot.db \
+#     --start 2026-06-01 --end 2026-06-30 \
+#     --log-dir logs/backtest/flip-jun --no-telegram
+
+pairs: [EURUSDm, GBPUSDm, AUDUSDm, NZDUSDm, USDJPYm, USDCADm, USDCHFm, BTCUSDm]
+
+strategy: h4_pullback
+
+risk_per_trade: 0.50
+max_open_trades: 8
+max_per_symbol: 1
+max_same_currency_bets: 8
+daily_loss_limit: 0.99
+max_drawdown_kill: 0.99
+cooldown_after_loss_min: 0
+
+session_utc: ["00:00", "23:59"]
+
+max_spread_pips:
+  EURUSDm: 2.5
+  GBPUSDm: 3.0
+  AUDUSDm: 3.0
+  NZDUSDm: 4.0
+  USDJPYm: 3.0
+  USDCADm: 3.5
+  USDCHFm: 3.5
+  BTCUSDm: 120.0
+
+trend_ema: 50
+pullback_ema: 20
+rsi_period: 14
+atr_period: 14
+atr_sl_mult: 1.2
+tp_r_multiple: 1.5
+spread_buffer_pips: 0.5
+
+pullback_lookback: 20
+pullback_expiry: 6
+swing_lookback: 10
+h1_slope_lookback: 5
+
+breakout_lookback: 20
+min_trend_atr_frac: 0.15
+require_impulse_candle: true
+breakout_rsi_long_max: 70.0
+breakout_rsi_short_min: 30.0
+
+h4_trend_ema: 50
+h4_slope_lookback: 3
+h4_atr_period: 14
+h4_trail_atr_mult: 2.0
+h4_trail_start_atr: 0.75
+h4_trail_min_lock_r: 0
+h4_breakeven_after_atr: 0.5
+h4_min_slope_atr_frac: 0
+h4_min_atr_percentile: 0
+h4_atr_percentile_lookback: 126
+
+h4_breakout_lookback: 20
+h4_atr_sl_mult: 1.0
+h4_max_sl_atr: 6.0
+h4_tp_r_cap: 8.0
+
+h4_pullback_ema: 20
+h4_pullback_lookback: 16
+h4_pullback_expiry: 6
+h4_pullback_extension_atr: 0.6
+h4_pullback_runners: true
+h4_pullback_tp_cap: 20.0
+h4_pullback_tp_r: 2.0
+h4_pullback_max_age: 5
+h4_swing_lookback: 6
+
+backtest_start_equity: 4000
+backtest_volume_min: 0.001
+backtest_volume_step: 0.001
+
+kill_switch_enabled: false
+
+symbol_profiles:
+  crypto:
+    symbols: [BTCUSDm]
+    max_spread_pips:
+      BTCUSDm: 120.0

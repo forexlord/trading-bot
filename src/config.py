@@ -100,6 +100,11 @@ class Settings(BaseSettings):
 
     backtest_start_equity: float
 
+    # Backtest-only: simulate sub-minimum lots for tiny-account research.
+    # Live bot always uses broker volume_min from MT5.
+    backtest_volume_min: float | None = None
+    backtest_volume_step: float | None = None
+
     kill_switch_enabled: bool = True
 
     # Optional per-asset-class overrides (see config/settings.yaml).
