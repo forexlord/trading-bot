@@ -93,6 +93,13 @@ def main() -> None:
         help="recurring USD contribution added on the 1st trading day of each "
         "new month (e.g. 40 = fund $40/month). The start balance is month 1.",
     )
+    parser.add_argument(
+        "--refill-on-bust",
+        type=float,
+        default=0.0,
+        help="inject a fresh USD stake ONLY when the account busts (balance<=0), "
+        "instead of monthly. Counts how many stakes the bot destroys.",
+    )
     parser.add_argument("--no-telegram", action="store_true")
     parser.add_argument(
         "--config",
@@ -135,6 +142,7 @@ def main() -> None:
     store.close()
 
     monthly_deposit_cents = args.monthly_deposit * 100.0  # USD -> cents
+    refill_on_bust_cents = args.refill_on_bust * 100.0  # USD -> cents
     engine = BacktestEngine(
         data=data,
         params=settings,
@@ -143,8 +151,15 @@ def main() -> None:
         timeline_start=ts_start,
         timeline_end=ts_end,
         monthly_deposit=monthly_deposit_cents,
+        refill_on_bust=refill_on_bust_cents,
     )
     engine.run()
+    if refill_on_bust_cents:
+        logger.info(
+            "Account busted %d time(s) — total re-staked $%.2f",
+            engine.bust_count,
+            engine.total_deposited / 100.0,
+        )
 
     trades = pd.DataFrame(engine.closed_trades)
     equity_curve = pd.DataFrame(engine.equity_history)

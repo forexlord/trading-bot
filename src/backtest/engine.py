@@ -120,6 +120,7 @@ class BacktestEngine:
         timeline_start: pd.Timestamp | None = None,
         timeline_end: pd.Timestamp | None = None,
         monthly_deposit: float = 0.0,
+        refill_on_bust: float = 0.0,
     ):
         self.data = data
         self.params = params
@@ -133,6 +134,11 @@ class BacktestEngine:
         # month after the start month (the start month's contribution is
         # start_equity). Grows the balance -> risk sizing scales up over time.
         self._monthly_deposit = float(monthly_deposit or 0.0)
+        # Alternative funding model: inject a fresh stake ONLY when the account
+        # busts (balance <= 0). Measures how many stakes the bot destroys, with
+        # no monthly cushion masking the result. Counts as deposits (not PnL).
+        self._refill_on_bust = float(refill_on_bust or 0.0)
+        self.bust_count = 0
         self.current_month: Any = None
         self.deposits: dict[Any, float] = {}   # date -> cents added that day
         self.total_deposited = 0.0
@@ -191,6 +197,7 @@ class BacktestEngine:
         try:
             for i, ts in enumerate(timeline):
                 self._roll_day_if_needed(ts)
+                self._maybe_refill(ts)  # re-stake a busted account before it can miss trades
                 for symbol, idx in self._symbols_at(ts).items():
                     self._process_exits(symbol, idx, ts)
                     self._process_eval(symbol, idx, ts)
@@ -246,6 +253,21 @@ class BacktestEngine:
         self.hwm = max(self.hwm, self.equity)  # deposit isn't a drawdown recovery
         self.deposits[day] = self.deposits.get(day, 0.0) + amt
         self.total_deposited += amt
+
+    def _maybe_refill(self, ts: pd.Timestamp) -> None:
+        """Bust-and-restake funding: when the account goes to zero, add a fresh
+        stake so trading continues. Each refill is a deposit (excluded from
+        trading PnL), so the report shows exactly how much was burned across all
+        blown stakes. Any negative overshoot is written off as a trading loss.
+        """
+        if self._refill_on_bust and self.balance <= 0:
+            day = ts.date()
+            self.balance += self._refill_on_bust
+            self.equity = self.balance
+            self.hwm = max(self.hwm, self.equity)
+            self.deposits[day] = self.deposits.get(day, 0.0) + self._refill_on_bust
+            self.total_deposited += self._refill_on_bust
+            self.bust_count += 1
 
     # -- exits ---------------------------------------------------------------
 
