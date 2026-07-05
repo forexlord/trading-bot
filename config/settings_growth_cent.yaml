@@ -1,0 +1,94 @@
+# Growth mode v3 — Exness CENT account, start $40, optimize for compounding.
+#
+# Two changes vs settings_growth.yaml solve the "3 trades in 6 months" problem:
+#
+#   1. contract_size: 1000  (cent account, not the 100k Standard lot). A $40
+#      deposit shows as 4000 cents; a 0.01 lot risks ~100x less per pip
+#      relative to balance, so honest %-based sizing fits and the
+#      `lot_size_too_small` rejections that killed 81/84 signals disappear.
+#      To trade this live you MUST open an Exness *Cent* account and use the
+#      `c`-suffix symbols (EURUSDc ...). The live bot reads the broker's real
+#      tick value, so contract_size below is backtest-only.
+#
+#   2. strategy: trend_pullback  (H1 regime + M15 entries). Stops are M15-ATR
+#      sized (~10-25 pips) not H4-ATR (~40-100), and it evaluates every M15
+#      bar instead of once per H4 close — tighter risk AND far more trades.
+#
+# Risk is tuned for growth (user accepts total loss) but keeps circuit
+# breakers so it can survive long enough to compound rather than blow up on
+# day one. $40 -> thousands is still a multi-year compounding problem; no
+# config makes that fast without a coin-flip on the whole stake.
+#
+#   KILL_SWITCH_ENABLED=false .venv/bin/python run_period_backtest.py \
+#     --config config/settings_growth_cent.yaml --db data/forex_bot.db \
+#     --start 2026-01-05 --end 2026-07-04 \
+#     --log-dir logs/backtest/growth-cent --no-telegram
+
+pairs: [EURUSDm, GBPUSDm, AUDUSDm, NZDUSDm, USDJPYm, USDCADm, USDCHFm]
+# NOTE: backtest uses the `m`-suffix price data already in the DB; the cent
+# economics come entirely from contract_size below. Live: switch to `c` pairs.
+
+strategy: trend_pullback
+
+# Cent account: 1 lot = 1,000 units (Standard is 100,000). Backtest-only.
+contract_size: 1000
+
+risk_per_trade: 0.03
+
+# Aggressive early, taper as equity grows. Fine cent granularity means these
+# are actually achievable now (they weren't on a Standard 0.01 min lot).
+growth_risk_tiers:
+  - until_equity: 8000      # $0-$80
+    risk_per_trade: 0.05
+    max_risk_when_min_lot: 0.06
+  - until_equity: 20000     # $80-$200
+    risk_per_trade: 0.04
+    max_risk_when_min_lot: 0.05
+  - until_equity: 50000     # $200-$500
+    risk_per_trade: 0.03
+    max_risk_when_min_lot: 0.04
+  - until_equity: 100000000
+    risk_per_trade: 0.025
+    max_risk_when_min_lot: 0.03
+
+allow_min_lot: true
+max_risk_when_min_lot: 0.05
+min_equity_cents: 1500      # stop trading below ~$15
+
+max_open_trades: 5
+max_per_symbol: 1
+max_same_currency_bets: 3   # bound USD stacking across the 7 majors
+daily_loss_limit: 0.10
+max_drawdown_kill: 0.35     # wider kill for growth; still a hard floor
+cooldown_after_loss_min: 10
+
+session_utc: ["00:00", "23:59"]
+
+max_spread_pips:
+  EURUSDm: 1.5
+  GBPUSDm: 2.0
+  AUDUSDm: 2.0
+  NZDUSDm: 3.0
+  USDJPYm: 2.0
+  USDCADm: 2.5
+  USDCHFm: 2.5
+
+# trend_pullback (H1 regime / M15 entries)
+trend_ema: 50
+pullback_ema: 20
+rsi_period: 14
+atr_period: 14
+atr_sl_mult: 1.2
+tp_r_multiple: 1.5
+spread_buffer_pips: 1.0
+
+pullback_lookback: 20
+pullback_expiry: 6
+swing_lookback: 10
+h1_slope_lookback: 5
+
+backtest_start_equity: 4000   # $40 in cents
+backtest_volume_min: 0.01
+backtest_volume_step: 0.01
+
+kill_switch_enabled: true

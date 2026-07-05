@@ -100,6 +100,10 @@ class Settings(BaseSettings):
 
     backtest_start_equity: float
 
+    # Backtest-only: units per 1.0 lot. Standard=100_000, Exness cent=1_000.
+    # Live path reads the broker's real tick value, so this is ignored live.
+    contract_size: float | None = None
+
     # Backtest-only: simulate sub-minimum lots for tiny-account research.
     # Live bot always uses broker volume_min from MT5.
     backtest_volume_min: float | None = None

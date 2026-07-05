@@ -33,7 +33,9 @@ WARMUP_H1_BARS = 300
 WARMUP_M15_BARS = 300
 
 
-def assumed_pip_value_per_lot(symbol: str, price: float) -> float:
+def assumed_pip_value_per_lot(
+    symbol: str, price: float, contract_size: float = CONTRACT_SIZE
+) -> float:
     """Backtest-only stand-in for symbol_info.trade_tick_value, in
     account-currency cents per pip per 1.0 lot.
 
@@ -43,8 +45,14 @@ def assumed_pip_value_per_lot(symbol: str, price: float) -> float:
     - Crosses (EURJPY, ...) would need a second pair's price — unsupported
       here; keep them out of backtest configs.
 
-    The live path (mt5_client.pip_value_per_lot) never uses this — it reads
-    the broker's real tick value/size instead.
+    ``contract_size`` defaults to a Standard lot (100k units). Exness **cent**
+    accounts use a 1,000-unit lot, so a 0.01 lot risks 100x less per pip
+    relative to the (also cent-denominated) balance — set ``contract_size:
+    1000`` in the config to model one. Equity is already tracked in cents, so
+    a $40 cent-account deposit is still start_equity=4000; only the pip value
+    shrinks. The live path (mt5_client.pip_value_per_lot) never uses this — it
+    reads the broker's real tick value/size instead, so it is correct for any
+    account type automatically.
     """
     base = symbol.upper().rstrip("MCI")  # strip Exness cent/etc. suffixes
     pip = pip_size(symbol)
@@ -52,11 +60,11 @@ def assumed_pip_value_per_lot(symbol: str, price: float) -> float:
         # USD-quoted crypto: $1 pip on 1.0 lot ≈ $1 PnL (live uses broker tick value).
         return pip * CRYPTO_CONTRACT_SIZE * CENTS_PER_UNIT
     if base.endswith("USD"):
-        return pip * CONTRACT_SIZE * CENTS_PER_UNIT
+        return pip * contract_size * CENTS_PER_UNIT
     if base.startswith("USD"):
         if price <= 0:
             raise ValueError(f"Need a positive price to value {symbol} pips")
-        return pip * CONTRACT_SIZE / price * CENTS_PER_UNIT
+        return pip * contract_size / price * CENTS_PER_UNIT
     raise ValueError(
         f"Backtest pip-value model supports only USD-quote or USD-base pairs, got {symbol}"
     )
@@ -109,6 +117,7 @@ class BacktestEngine:
     ):
         self.data = data
         self.params = params
+        self._contract_size = float(getattr(params, "contract_size", None) or CONTRACT_SIZE)
         self.equity = start_equity
         self.balance = start_equity
         self.hwm = start_equity
@@ -236,7 +245,7 @@ class BacktestEngine:
         self, position: OpenPosition, ts: pd.Timestamp, exit_price: float, outcome: str
     ) -> None:
         pip = pip_size(position.symbol)
-        pip_value = assumed_pip_value_per_lot(position.symbol, exit_price)
+        pip_value = assumed_pip_value_per_lot(position.symbol, exit_price, self._contract_size)
         price_diff = (exit_price - position.entry) if position.side == "LONG" else (position.entry - exit_price)
         pnl = (price_diff / pip) * pip_value * position.lots
         r_result = pnl / position.risk_amount if position.risk_amount > 0 else 0.0
@@ -417,7 +426,7 @@ class BacktestEngine:
         else:
             self.kill_switch_triggered = False
 
-        pip_value = assumed_pip_value_per_lot(symbol, price)
+        pip_value = assumed_pip_value_per_lot(symbol, price, self._contract_size)
         vol_min = float(getattr(self.params, "backtest_volume_min", None) or 0.01)
         vol_step = float(getattr(self.params, "backtest_volume_step", None) or vol_min)
         symbol_info = rm.SymbolInfo(pip_value_per_lot=pip_value, volume_step=vol_step, volume_min=vol_min)
