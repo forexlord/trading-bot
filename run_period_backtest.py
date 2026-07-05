@@ -43,6 +43,14 @@ def end_of_day(d: datetime) -> datetime:
     return d.replace(hour=23, minute=59, second=59)
 
 
+def _json_safe(value):
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):
+        return None
+    return value
+
+
 def load_data(
     store: Store,
     pairs: list[str],
@@ -79,9 +87,15 @@ def main() -> None:
     parser.add_argument("--warmup-days", type=int, default=WARMUP_DAYS)
     parser.add_argument("--equity", type=float, default=None)
     parser.add_argument("--no-telegram", action="store_true")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="settings YAML path (default: config/settings.yaml)",
+    )
     args = parser.parse_args()
 
-    settings = load_settings()
+    settings = load_settings(args.config)
     logger.info("kill_switch_enabled=%s", settings.kill_switch_enabled)
 
     period_start = args.start
@@ -158,7 +172,9 @@ def main() -> None:
         "trade_stats": rollups.get("trade_stats"),
         "reject_counts": reject_counts,
     }
-    summary_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    summary_path.write_text(
+        json.dumps(_json_safe(payload), indent=2, default=str), encoding="utf-8"
+    )
     logger.info("Saved %s", summary_path)
 
 

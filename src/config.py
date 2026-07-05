@@ -131,8 +131,8 @@ class Secrets(BaseSettings):
     telegram_chat_id: str = ""
 
 
-def load_settings() -> Settings:
-    return Settings.load()
+def load_settings(path: Path | None = None) -> Settings:
+    return Settings.load(path or SETTINGS_YAML_PATH)
 
 
 def load_secrets() -> Secrets:

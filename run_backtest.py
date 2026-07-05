@@ -101,6 +101,12 @@ def main() -> None:
         help="print last saved summary.json and exit (no re-run)",
     )
     parser.add_argument("--no-telegram", action="store_true", help="skip Telegram notification")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="settings YAML path (default: config/settings.yaml)",
+    )
     args = parser.parse_args()
 
     summary_path = Path(args.log_dir) / "summary.json"
@@ -111,7 +117,7 @@ def main() -> None:
         print(summary_path.read_text(encoding="utf-8"))
         return
 
-    settings = load_settings()
+    settings = load_settings(args.config)
     logger.info(
         "kill_switch_enabled=%s (set KILL_SWITCH_ENABLED=false in .env to disable for research)",
         settings.kill_switch_enabled,

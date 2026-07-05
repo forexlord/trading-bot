@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 SLIPPAGE_PIPS = 0.5
 CONTRACT_SIZE = 100_000
+CRYPTO_CONTRACT_SIZE = 1.0  # 1 lot = 1 coin (Exness BTCUSD / ETHUSD)
 CENTS_PER_UNIT = 100  # account currency is USD-cents
 WARMUP_H1_BARS = 300
 WARMUP_M15_BARS = 300
@@ -46,6 +47,9 @@ def assumed_pip_value_per_lot(symbol: str, price: float) -> float:
     """
     base = symbol.upper().rstrip("MCI")  # strip Exness cent/etc. suffixes
     pip = pip_size(symbol)
+    if base.startswith("BTC") or base.startswith("ETH"):
+        # USD-quoted crypto: $1 pip on 1.0 lot ≈ $1 PnL (live uses broker tick value).
+        return pip * CRYPTO_CONTRACT_SIZE * CENTS_PER_UNIT
     if base.endswith("USD"):
         return pip * CONTRACT_SIZE * CENTS_PER_UNIT
     if base.startswith("USD"):

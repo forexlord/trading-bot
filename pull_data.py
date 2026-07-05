@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import logging
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from src.config import load_secrets, load_settings
 from src.data.mt5_client import MT5Client
@@ -65,9 +66,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--days", type=int, default=DEFAULT_HISTORY_DAYS)
     parser.add_argument("--db", type=str, default="forex_bot.db")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="settings YAML path (default: config/settings.yaml)",
+    )
     args = parser.parse_args()
 
-    settings = load_settings()
+    settings = load_settings(args.config)
     pull(settings.pairs, args.days, args.db)
 
 

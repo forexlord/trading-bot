@@ -5,11 +5,15 @@ from dataclasses import dataclass
 
 JPY_PIP_SIZE = 0.01
 DEFAULT_PIP_SIZE = 0.0001
+# Crypto vs USD: 1 pip = $1 price move (Exness BTCUSD / ETHUSD convention).
+CRYPTO_PIP_SIZE = 1.0
 
 
 def pip_size(symbol: str) -> float:
     # Exness cent symbols end with "m" (EURUSDm); still non-JPY pip size.
     base = symbol.upper().rstrip("MCI")
+    if base.startswith("BTC") or base.startswith("ETH"):
+        return CRYPTO_PIP_SIZE
     return JPY_PIP_SIZE if base.endswith("JPY") else DEFAULT_PIP_SIZE
 
 

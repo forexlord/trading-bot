@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from src.backtest.engine import BacktestEngine, OpenPosition, _SymbolData, assumed_pip_value_per_lot
+from src.strategy.common import pip_size
 from tests.test_strategy import PARAMS as STRAT_PARAMS
 from tests.test_strategy import _m15_pullback_sequence, _uptrend_h1
 
@@ -34,6 +35,15 @@ def test_pip_value_usd_base_pairs_divide_by_price():
 def test_pip_value_rejects_crosses():
     with pytest.raises(ValueError):
         assumed_pip_value_per_lot("EURJPY", 160.0)
+
+
+def test_pip_size_btc():
+    assert pip_size("BTCUSDm") == 1.0
+
+
+def test_pip_value_btc_usd():
+    # $1 pip on 1 BTC lot ≈ $1 = 100 cents
+    assert assumed_pip_value_per_lot("BTCUSDm", 97000.0) == pytest.approx(100.0)
 
 
 def test_both_touched_in_one_candle_resolves_to_sl(tmp_path):
