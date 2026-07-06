@@ -32,9 +32,18 @@ def test_pip_value_usd_base_pairs_divide_by_price():
     assert assumed_pip_value_per_lot("USDCADm", 1.36) == pytest.approx(0.0001 * 100000 / 1.36 * 100)
 
 
-def test_pip_value_rejects_crosses():
+def test_pip_value_crosses():
+    # Cross pips are valued in the quote currency, converted to USD (cents) via
+    # USD_PER_UNIT. EURJPY: 1 pip (0.01 JPY) * 100k = 1000 JPY * ~0.0067 ≈ $6.70.
+    assert assumed_pip_value_per_lot("EURJPYm", 160.0) == pytest.approx(670.0)
+    # EURGBP: 1 pip (0.0001 GBP) * 100k = 10 GBP * 1.27 = $12.70.
+    assert assumed_pip_value_per_lot("EURGBPm", 0.85) == pytest.approx(1270.0)
+
+
+def test_pip_value_rejects_unknown_cross_currency():
+    # A cross whose quote currency has no USD_PER_UNIT entry still errors.
     with pytest.raises(ValueError):
-        assumed_pip_value_per_lot("EURJPY", 160.0)
+        assumed_pip_value_per_lot("EURTRYm", 35.0)
 
 
 def test_pip_size_btc():

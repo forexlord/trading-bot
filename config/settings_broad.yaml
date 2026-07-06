@@ -1,0 +1,128 @@
+# Broad diversified universe — the CTA-style breadth test.
+# Majors + crosses (now supported!) + crypto + gold. One trend strategy across
+# ~22 markets; the trend-strength filter + correlation cap decide which ones
+# actually get traded each period ("trade what's trending").
+#
+# STEP 1 — pull the data (needs MT5 terminal + bridge). BTCUSDm is already in the
+# DB; this fetches the rest. If any symbol says "Stored 0 candles", your broker
+# names it differently — fix that entry in `pairs` to match Market Watch exactly.
+#   .venv/bin/python pull_data.py --config config/settings_broad.yaml --db data/forex_bot.db
+#
+# STEP 2 — backtest (all out-of-sample; nothing tuned on it). Funded at $10k so
+# ~8 concurrent positions across markets can size at sane 1% risk; a $40 account
+# can't run a diversified book (that's the capital reality, unchanged).
+#   KILL_SWITCH_ENABLED=false .venv/bin/python run_period_backtest.py \
+#     --config config/settings_broad.yaml --db data/forex_bot.db \
+#     --start 2024-09-05 --end 2026-07-03 \
+#     --log-dir logs/backtest/broad --no-telegram
+#
+# NOTE: cross pip values use approximate constant FX rates (~10% accurate) and
+# cross spreads below are estimates — good enough to see IF breadth creates a
+# robust edge, not for live-precise PnL.
+
+pairs:
+  # USD majors
+  - EURUSDm
+  - GBPUSDm
+  - AUDUSDm
+  - NZDUSDm
+  - USDJPYm
+  - USDCADm
+  - USDCHFm
+  # crosses (quote currency must be in engine USD_PER_UNIT: JPY/GBP/AUD/NZD/CHF/CAD)
+  - EURJPYm
+  - GBPJPYm
+  - AUDJPYm
+  - CADJPYm
+  - NZDJPYm
+  - EURGBPm
+  - EURAUDm
+  - EURCHFm
+  - EURCADm
+  - GBPAUDm
+  - GBPNZDm
+  - AUDNZDm
+  # crypto + metal
+  - BTCUSDm
+  - ETHUSDm
+  - XAUUSDm
+
+strategy: h4_pullback
+
+risk_per_trade: 0.01
+max_open_trades: 8
+max_per_symbol: 1
+max_same_currency_bets: 3     # bound EUR/USD/JPY stacking across correlated pairs
+daily_loss_limit: 0.08
+max_drawdown_kill: 0.30
+cooldown_after_loss_min: 10
+
+session_utc: ["00:00", "23:59"]
+
+max_spread_pips:
+  EURUSDm: 1.5
+  GBPUSDm: 2.0
+  AUDUSDm: 2.0
+  NZDUSDm: 3.0
+  USDJPYm: 2.0
+  USDCADm: 2.5
+  USDCHFm: 2.5
+  EURJPYm: 3.0
+  GBPJPYm: 4.0
+  AUDJPYm: 3.0
+  CADJPYm: 3.5
+  NZDJPYm: 3.5
+  EURGBPm: 2.5
+  EURAUDm: 3.5
+  EURCHFm: 3.0
+  EURCADm: 3.5
+  GBPAUDm: 4.5
+  GBPNZDm: 5.0
+  AUDNZDm: 3.5
+  BTCUSDm: 80.0
+  ETHUSDm: 5.0
+  XAUUSDm: 5.0
+
+trend_ema: 50
+pullback_ema: 20
+rsi_period: 14
+atr_period: 14
+atr_sl_mult: 1.2
+tp_r_multiple: 1.5
+spread_buffer_pips: 1.0
+
+pullback_lookback: 20
+pullback_expiry: 6
+swing_lookback: 10
+h1_slope_lookback: 5
+
+# h4_pullback (dip/rally entries in H4 trend, runners let winners ride)
+h4_trend_ema: 50
+h4_slope_lookback: 3
+h4_atr_period: 14
+h4_trail_atr_mult: 2.5
+h4_trail_start_atr: 1.0
+h4_trail_min_lock_r: 1.25
+h4_breakeven_after_atr: 1.0
+h4_min_slope_atr_frac: 0.06
+h4_min_atr_percentile: 0
+h4_atr_percentile_lookback: 126
+
+h4_breakout_lookback: 20
+h4_atr_sl_mult: 1.2
+h4_max_sl_atr: 1.5
+h4_tp_r_cap: 8.0
+
+h4_pullback_ema: 20
+h4_pullback_lookback: 12
+h4_pullback_expiry: 4
+h4_pullback_extension_atr: 1.0
+h4_pullback_runners: true
+h4_pullback_tp_cap: 8.0
+h4_pullback_tp_r: 2.0
+h4_pullback_max_age: 2
+h4_swing_lookback: 8
+
+backtest_start_equity: 1000000   # $10,000 — enough to run a diversified book
+
+kill_switch_enabled: true

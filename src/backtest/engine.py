@@ -30,6 +30,23 @@ CONTRACT_SIZE = 100_000
 CRYPTO_CONTRACT_SIZE = 1.0  # 1 lot = 1 coin (Exness BTCUSD / ETHUSD)
 GOLD_CONTRACT_SIZE = 100  # 1 lot XAUUSD = 100 troy oz (Exness)
 CENTS_PER_UNIT = 100  # account currency is USD-cents
+
+# Approximate USD value of 1 unit of each currency, used ONLY to value pips on
+# non-USD CROSS pairs (e.g. EURGBP, GBPJPY) in the backtest. These are coarse
+# constants — cross pip value is thus accurate to ~10% (rates drift over time),
+# which is fine for research: it scales sizing and PnL together, creating no
+# fake edge. The live bot never uses these; it reads the broker's real tick
+# value. Extend this map to trade crosses whose quote currency isn't listed.
+USD_PER_UNIT = {
+    "USD": 1.0,
+    "EUR": 1.08,
+    "GBP": 1.27,
+    "AUD": 0.66,
+    "NZD": 0.60,
+    "CAD": 0.74,   # ~1/1.35
+    "CHF": 1.11,   # ~1/0.90
+    "JPY": 0.0067,  # ~1/150
+}
 WARMUP_H1_BARS = 300
 WARMUP_M15_BARS = 300
 
@@ -43,8 +60,9 @@ def assumed_pip_value_per_lot(
     - USD-quote pairs (EURUSD, GBPUSD, AUDUSD, NZDUSD): pip * contract.
     - USD-base pairs (USDJPY, USDCAD, USDCHF): pip value is in the quote
       currency; convert to USD by dividing by the pair's own price.
-    - Crosses (EURJPY, ...) would need a second pair's price — unsupported
-      here; keep them out of backtest configs.
+    - Crosses (EURJPY, EURGBP, GBPJPY, ...): pip value is in the quote
+      currency; convert to USD with an approximate constant rate from
+      USD_PER_UNIT (see its note on why coarse is fine for a backtest).
 
     ``contract_size`` defaults to a Standard lot (100k units). Exness **cent**
     accounts use a 1,000-unit lot, so a 0.01 lot risks 100x less per pip
@@ -70,9 +88,16 @@ def assumed_pip_value_per_lot(
         if price <= 0:
             raise ValueError(f"Need a positive price to value {symbol} pips")
         return pip * contract_size / price * CENTS_PER_UNIT
-    raise ValueError(
-        f"Backtest pip-value model supports only USD-quote or USD-base pairs, got {symbol}"
-    )
+    # Cross (neither leg is USD): value the pip in the quote currency, then
+    # convert to USD with an approximate constant rate.
+    quote = base[3:6]
+    rate = USD_PER_UNIT.get(quote)
+    if rate is None:
+        raise ValueError(
+            f"No USD conversion rate for quote currency {quote!r} of {symbol}; "
+            f"add it to USD_PER_UNIT to trade this cross."
+        )
+    return pip * contract_size * rate * CENTS_PER_UNIT
 
 
 @dataclass
